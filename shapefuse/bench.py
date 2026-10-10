@@ -22,6 +22,7 @@ from shapefuse.profiler_hooks import (
     NSIGHT_AI_STATUSES,
     PROFILER_OFF,
     TBD_NSIGHT,
+    TORCH_MEMORY,
     profile_matmul_memory,
 )
 
@@ -206,8 +207,9 @@ def run_bench(
             "regime_vs_h100_datasheet uses the H100 SXM FP16 datasheet ridge even "
             "when the GPU is not an H100. regime_vs_requested_datasheet uses "
             "--machine. Neither column is a measured ridge. achieved_ai is set "
-            "only from Nsight DRAM bytes. proxy_ai from torch.profiler is "
-            "allocator memory and is not achieved AI."
+            "only from Nsight DRAM bytes. proxy_ai is allocator memory "
+            "(torch.profiler events, or a caching-allocator delta if those "
+            "events are empty). Neither is achieved AI."
         ),
     }
     return rows, meta
@@ -263,9 +265,14 @@ def _annotate_bytes(
     prof = profile_matmul_memory(int(row["M"]), int(row["N"]), int(row["K"]), cuda=cuda)
     row["proxy_ai_status"] = prof["status"]
     row["proxy_ai_error"] = prof.get("error") or ""
+    row["proxy_byte_source"] = prof.get("source") or ""
     if prof["bytes"]:
-        row["torch_profiler_memory_bytes"] = prof["bytes"]
+        row["proxy_bytes"] = prof["bytes"]
         row["proxy_ai"] = flops / float(prof["bytes"])
+        # The historical column is profiler memory only. An allocator-delta
+        # fallback must not be stored under that name.
+        if prof["status"] == TORCH_MEMORY:
+            row["torch_profiler_memory_bytes"] = prof["bytes"]
 
 
 def _time_one(ctx: BenchContext, label: str, m: int, n: int, k: int, repeats: int, warmup: int) -> dict:
@@ -285,9 +292,11 @@ def _time_one(ctx: BenchContext, label: str, m: int, n: int, k: int, repeats: in
         "achieved_ai": None,
         "achieved_ai_status": TBD_NSIGHT,
         "torch_profiler_memory_bytes": None,
+        "proxy_bytes": None,
         "proxy_ai": None,
         "proxy_ai_status": PROFILER_OFF,
         "proxy_ai_error": "",
+        "proxy_byte_source": "",
         "kernel": "pytorch_matmul" if ctx.backend != "cpu-numpy" else "numpy_matmul",
         "fused_plan_timed": False,
         "placeholder": ctx.placeholder,

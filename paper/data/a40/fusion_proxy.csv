@@ -1,0 +1,64 @@
+label,M,N,K,op,variant,honesty,median_s,unfused_reference_s,time_ratio_unfused_over_this,time_ratio_status,backend,device_name,placeholder,dtype_ran,memmode_kernel,computemode_kernel,kernel_emitted,ok,error
+decode_gemv,1,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.0001703360006,0.0001703360006,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_gemv,1,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.0001227200031,0.0001703360006,1.388005185,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_gemv,1,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.000210559994,0.0001703360006,0.8089665914,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_gemv,1,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.0002567999959,0.0002567999959,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_gemv,1,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.0002208639979,0.0002567999959,1.162706454,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_gemv,1,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.0002567999959,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"
+micro_batch,4,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.0001768000051,0.0001768000051,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+micro_batch,4,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.0001209919974,0.0001768000051,1.46125371,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+micro_batch,4,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.0001343999952,0.0001768000051,1.315476276,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+micro_batch,4,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.000156064,0.000156064,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+micro_batch,4,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.0001384319961,0.000156064,1.127369426,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+micro_batch,4,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.000156064,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"
+decode_batch32,32,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.0001767680049,0.0001767680049,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_batch32,32,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.000123999998,0.0001767680049,1.42554845,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_batch32,32,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.000137567997,0.0001767680049,1.284950052,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_batch32,32,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.0001590720005,0.0001590720005,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_batch32,32,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.0001383679956,0.0001590720005,1.149630012,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+decode_batch32,32,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.0001590720005,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"
+near_mstar,344,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.000242399998,0.000242399998,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+near_mstar,344,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.0001803839952,0.000242399998,1.343799918,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+near_mstar,344,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.0002046719939,0.000242399998,1.184333985,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+near_mstar,344,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.0001570880059,0.0001570880059,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+near_mstar,344,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.0001411200017,0.0001570880059,1.113151956,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+near_mstar,344,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.0001570880059,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"
+ridge_m512,512,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.0002779520079,0.0002779520079,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+ridge_m512,512,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.0002496320009,0.0002779520079,1.113447022,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+ridge_m512,512,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.0002403199971,0.0002779520079,1.156591259,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+ridge_m512,512,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.0001959039979,0.0001959039979,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+ridge_m512,512,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.0001770559996,0.0001959039979,1.106452186,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+ridge_m512,512,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.0001959039979,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"
+prefill_m2048,2048,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.0008934399784,0.0008934399784,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+prefill_m2048,2048,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.0008818879724,0.0008934399784,1.013099176,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+prefill_m2048,2048,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.0007685440183,0.0008934399784,1.162509833,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+prefill_m2048,2048,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.0007592959851,0.0007592959851,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+prefill_m2048,2048,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.0007457919717,0.0007592959851,1.018106944,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+prefill_m2048,2048,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.0007592959851,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"
+square_large,4096,4096,4096,matmul_rmsnorm,unfused_two_regions,TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM,0.001646175981,0.001646175981,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+square_large,4096,4096,4096,matmul_rmsnorm,eager_chain,EAGER_CHAIN_STILL_SEPARATE_OPS,0.001635583997,0.001646175981,1.006475964,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+square_large,4096,4096,4096,matmul_rmsnorm,torch_compile,TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED,0.001369536042,0.001646175981,1.201995369,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+square_large,4096,4096,4096,bias_gelu,unfused_two_regions,ELEMENTWISE_TWO_KERNEL_NOT_GEMM_FUSION,0.001466112003,0.001466112003,1,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+square_large,4096,4096,4096,bias_gelu,hand_elementwise_stub,ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION,0.00144876802,0.001466112003,1.011971539,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,true,
+square_large,4096,4096,4096,bias_gelu,triton,TRITON_KERNEL_FAILED,,0.001466112003,,PROXY_TIMING_NOT_A_FUSION_SPEEDUP,cuda-torch,NVIDIA A40,false,fp16,false,false,false,false,"at 1:48:
+def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
+                                                ^
+NameError('tl is not defined')"

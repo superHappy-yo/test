@@ -28,7 +28,8 @@ shapefuse/            package: intensity, SCIC, plans, sweeps, bench, CLI
 scripts/run_cpu.sh    analytical run, safe without a GPU
 scripts/run_h100.sh   same tables plus a CUDA matmul sweep; refuses to run with no GPU
 scripts/run_a40.sh    A40 datasheet anchor, matmul sweep, profiler proxy, fusion proxy
-scripts/nsight_dram.sh  optional ncu capture; not run unless TRY_NSIGHT=1
+scripts/nsight_dram.sh  optional ncu capture; strongly recommended via TRY_NSIGHT=1
+scripts/bandwidth_probe.sh  copy-kernel GDDR estimate; ESTIMATE_COPY_NOT_NSIGHT, not a measured ridge
 paper/draft.md        English MLSys/ASPLOS-style draft, with TBD markers
 paper/zh_outline.md   Chinese outline
 notes/draft_report_zh.md
@@ -93,23 +94,26 @@ What that sweep actually times is stock `torch.matmul` at M ∈ {1, 4, 32, 344, 
 bash scripts/run_a40.sh
 # PyTorch already installed:
 SKIP_INSTALL=1 bash scripts/run_a40.sh
-# also try Nsight Compute (fails soft; the matmul sweep still runs):
+# Strongly recommended. Nsight DRAM is still missing from the archived package:
 TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
 ```
 
-Default output directory is `results/a40`. Default `--machine` is `A40_FP16`. The script requires `nvidia-smi` and CUDA PyTorch, prints the device name, and warns if that name does not contain `A40`.
+Default output directory is `results/a40`. Default `--machine` is `A40_FP16`. The script requires `nvidia-smi` and CUDA PyTorch, prints the device name, and warns if that name does not contain `A40`. It prints whether `ncu` is on `PATH`. **`ncu` is Nsight Compute, not the driver.** If it is missing, the script says so and, when `TRY_NSIGHT=1`, writes `nsight_skipped.txt` and continues. DRAM bytes stay empty. Do not fill them from the profiler.
 
-One archived A40 run is already in the paper (`paper/data/a40/`, status `PARTIAL_VENDOR_MATMUL`). That run used `--machine H100_SXM_FP16`, so its regime column is the H100 datasheet. It timed `torch.matmul` only. Re-run with `scripts/run_a40.sh` before treating regimes as A40-datasheet labels. The new script still does not emit MemMode or ComputeMode kernels.
+The archived package in the paper (`paper/data/a40/`) is the second A40 upload: `--machine A40_FP16`, status `PARTIAL_VENDOR_MATMUL`, `nsight_status` `TBD_RUN_PROFILER`, `proxy_ai` `TORCH_PROFILER_EMPTY`, `quote_as_scic_accuracy` false. Triton bias+GELU failed with `NameError: tl is not defined` in that upload; the kernel in this tree imports `triton.language as tl` in module scope so the next run can launch the elementwise stub. That stub is still not a fused GEMM. The script still does not emit MemMode or ComputeMode kernels.
+
+`scripts/bandwidth_probe.sh` (also invoked at the end of `run_a40.sh`) times a device-to-device copy and writes `bandwidth_estimate.json` with status `ESTIMATE_COPY_NOT_NSIGHT`. The ridge numerator is the datasheet FLOP peak. It does not set `measured_ridge_flops_per_byte`.
 
 What the new script adds, and what it is not:
 
 | output | meaning |
 | --- | --- |
 | `bench_gemm.csv` | `torch.matmul` latency and TFLOP/s. `achieved_ai` stays empty without Nsight |
-| `proxy_ai` | FLOPs / `torch.profiler` allocator bytes, status `TORCH_PROFILER_MEMORY_NOT_DRAM` |
-| `fusion_proxy.csv` | matmul+RMSNorm two-region vs eager chain vs `torch.compile` if it runs; bias+GELU two ops vs one Python expression; Triton elementwise stub only if Triton imports. Read the `honesty` column. Not a fused GEMM |
+| `proxy_ai` | FLOPs / allocator bytes. `TORCH_PROFILER_MEMORY_NOT_DRAM` when profiler events have bytes. `TORCH_ALLOCATOR_DELTA_NOT_DRAM` when the profiler table is empty and the caching allocator moved. `TORCH_PROFILER_EMPTY` when neither did. Not DRAM |
+| `fusion_proxy.csv` | matmul+RMSNorm two-region vs eager chain vs `torch.compile` if it runs; bias+GELU two ops vs one Python expression; Triton elementwise stub when Triton imports. Time ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`. Not a fused GEMM |
 | `decision_log.csv`, `agreement.json` | analytical plan vs regime from whatever byte AI exists. Quote as SCIC accuracy only when `quote_as_scic_accuracy` is true (`NSIGHT_DRAM`) |
-| `nsight_dram.json` | only after `TRY_NSIGHT=1` succeeds. Status `NSIGHT_DRAM_PROCESS_SUM` (process-wide sum, copies included) |
+| `nsight_dram.json` | only after `TRY_NSIGHT=1` and `ncu` succeed. Status `NSIGHT_DRAM_PROCESS_SUM` (process-wide sum, copies included). If `ncu` is missing, see `nsight_skipped.txt` |
+| `bandwidth_estimate.json` | copy-kernel estimate, `ESTIMATE_COPY_NOT_NSIGHT`. Not a measured ridge |
 
 `scripts/nsight_dram.sh` wraps `ncu`. Metric names vary; the default is `dram__bytes_read.sum,dram__bytes_write.sum`. Override with `NCU_METRICS`. List them with `ncu --query-metrics | grep dram__bytes`.
 
@@ -122,7 +126,8 @@ After `scripts/run_a40.sh` (or the H100 script), send the whole output directory
 - `gemm_shapes.csv`, `attention_intensity.csv`, `attention_decode.csv`
 - `rmsnorm_epilogue.csv`, `ew_chains.csv`, `moe_grouped.csv`, `quant_epilogue.csv`, `dual_plans.csv`
 - `fig_*.png` (including `fig_vendor_matmul_tflops.png`)
-- `nsight_dram.json` if `TRY_NSIGHT=1` succeeded
+- `nsight_dram.json` if `TRY_NSIGHT=1` succeeded, or `nsight_skipped.txt` if `ncu` was missing or `ncu` failed
+- `bandwidth_estimate.json` if the copy probe ran (`ESTIMATE_COPY_NOT_NSIGHT`)
 - the `nvidia-smi` header (driver, GPU name) and `torch.__version__` (already copied into `gpu_measurements.json` when CUDA runs)
 
 Leave the following as TBD unless the file actually contains them. Do not invent numbers. Do not quote `proxy_ai` or a process-sum agreement rate as SCIC accuracy.
@@ -130,8 +135,8 @@ Leave the following as TBD unless the file actually contains them. Do not invent
 | quantity | where it goes |
 | --- | --- |
 | DRAM bytes and achieved AI | `nsight_dram_bytes`, `achieved_ai` after Nsight JSON is ingested. Status must be `NSIGHT_DRAM` or `NSIGHT_DRAM_PROCESS_SUM` |
-| profiler memory (not DRAM) | `torch_profiler_memory_bytes`, `proxy_ai`, status `TORCH_PROFILER_MEMORY_NOT_DRAM` |
-| measured bandwidth and ridge | `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte` |
+| profiler memory (not DRAM) | `torch_profiler_memory_bytes`, `proxy_ai`, status `TORCH_PROFILER_MEMORY_NOT_DRAM`. Allocator-delta fallback: status `TORCH_ALLOCATOR_DELTA_NOT_DRAM`, column `proxy_bytes` |
+| measured bandwidth and ridge | `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte`. A copy-kernel file does not fill these |
 | MemMode vs ComputeMode kernel time | not produced. `fusion_proxy.csv` is a proxy with an `honesty` column |
 | SCIC accuracy vs isolated Nsight AI | `agreement.json` only if `quote_as_scic_accuracy` is true |
 | plan-switch overhead, tokens/s | paper evaluation, TBD |
@@ -224,20 +229,24 @@ SKIP_INSTALL=1 bash scripts/run_h100.sh
 ```bash
 bash scripts/run_a40.sh
 SKIP_INSTALL=1 bash scripts/run_a40.sh
+# 强烈建议。归档包里没有 Nsight DRAM：
 TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
 ```
 
-默认输出 `results/a40`，数据手册锚点 `A40_FP16`。脚本检查 `nvidia-smi` 和 CUDA，设备名不含 A40 时只警告、不把结果改写成别的 GPU。
+默认输出 `results/a40`，数据手册锚点 `A40_FP16`。脚本检查 `nvidia-smi` 和 CUDA，设备名不含 A40 时只警告。它会打印 `ncu` 是否在 `PATH` 上。**`ncu` 是 Nsight Compute，不是驱动。** 找不到时会说明；若同时设了 `TRY_NSIGHT=1`，会写 `nsight_skipped.txt` 并继续。DRAM 字节保持为空，不要用 profiler 填。
 
-论文里已经有一份 A40 归档（`paper/data/a40/`，`PARTIAL_VENDOR_MATMUL`）。那次用的是 `--machine H100_SXM_FP16`，regime 列是 H100 数据手册，计时的是 `torch.matmul`。下一轮请跑 `scripts/run_a40.sh`。新脚本仍然不生成 MemMode / ComputeMode kernel。
+论文归档（`paper/data/a40/`）是第二次 A40 上传：`--machine A40_FP16`，`PARTIAL_VENDOR_MATMUL`，`nsight_status` 为 `TBD_RUN_PROFILER`，`proxy_ai` 为 `TORCH_PROFILER_EMPTY`，`quote_as_scic_accuracy` 为 false。那次 Triton bias+GELU 因 `NameError: tl is not defined` 失败。当前代码在模块作用域 `import triton.language as tl`。这个 stub 仍然不是融合 GEMM。脚本仍然不生成 MemMode / ComputeMode kernel。
+
+`scripts/bandwidth_probe.sh`（`run_a40.sh` 末尾也会跑）用一次 device-to-device copy 估计带宽，写入 `bandwidth_estimate.json`，状态 `ESTIMATE_COPY_NOT_NSIGHT`。ridge 的分子是数据手册 FLOP 峰值。它不会写入 `measured_ridge_flops_per_byte`。
 
 | 产物 | 含义 |
 | --- | --- |
 | `bench_gemm.csv` | `torch.matmul` 时延和 TFLOP/s。没有 Nsight 时 `achieved_ai` 为空 |
-| `proxy_ai` | FLOPs / torch.profiler 分配器字节，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM` |
-| `fusion_proxy.csv` | matmul+RMSNorm 与 bias+GELU 的代理。看 `honesty` 列。不是融合 GEMM |
+| `proxy_ai` | 分配器字节。profiler 事件为 `TORCH_PROFILER_MEMORY_NOT_DRAM`；事件为空时的缓存分配器差分为 `TORCH_ALLOCATOR_DELTA_NOT_DRAM`；两者都没有则 `TORCH_PROFILER_EMPTY`。不是 DRAM |
+| `fusion_proxy.csv` | matmul+RMSNorm 与 bias+GELU 的代理。时间比的状态是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。不是融合 GEMM |
 | `decision_log.csv`、`agreement.json` | 解析计划对字节 AI。只有 `quote_as_scic_accuracy=true`（`NSIGHT_DRAM`）才能当准确率 |
-| `nsight_dram.json` | 仅 `TRY_NSIGHT=1` 成功时。状态 `NSIGHT_DRAM_PROCESS_SUM` |
+| `nsight_dram.json` | 仅 `TRY_NSIGHT=1` 且 `ncu` 成功。状态 `NSIGHT_DRAM_PROCESS_SUM`。没有 `ncu` 时看 `nsight_skipped.txt` |
+| `bandwidth_estimate.json` | copy 估计，`ESTIMATE_COPY_NOT_NSIGHT`。不是实测 ridge |
 
 ## 论文需要你寄回的东西
 
@@ -248,7 +257,8 @@ TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
 - `gemm_shapes.csv`、`attention_intensity.csv`、`attention_decode.csv`
 - `rmsnorm_epilogue.csv`、`ew_chains.csv`、`moe_grouped.csv`、`quant_epilogue.csv`、`dual_plans.csv`
 - `fig_*.png`（含 `fig_vendor_matmul_tflops.png`）
-- 若 `TRY_NSIGHT=1` 成功：`nsight_dram.json`
+- 若 `TRY_NSIGHT=1` 成功：`nsight_dram.json`；若 `ncu` 缺失或失败：`nsight_skipped.txt`
+- 若 copy 探针跑过：`bandwidth_estimate.json`（`ESTIMATE_COPY_NOT_NSIGHT`）
 - `nvidia-smi` 抬头（驱动、GPU 名）和 PyTorch 版本（CUDA 跑通时会写进 `gpu_measurements.json`）
 
 下面这些没有写进文件就保持 TBD。不要把 `proxy_ai` 或进程合计的一致率当成 SCIC 准确率。
@@ -256,8 +266,8 @@ TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
 | 量 | 填到哪里 |
 | --- | --- |
 | DRAM 字节和 achieved AI | 摄入 Nsight JSON 之后的 `nsight_dram_bytes`、`achieved_ai`。状态应为 `NSIGHT_DRAM` 或 `NSIGHT_DRAM_PROCESS_SUM` |
-| profiler 显存（不是 DRAM） | `torch_profiler_memory_bytes`、`proxy_ai`，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM` |
-| 实测带宽和 ridge | `measured_hbm_bandwidth_bytes_per_s`、`measured_ridge_flops_per_byte` |
+| profiler 显存（不是 DRAM） | `torch_profiler_memory_bytes`、`proxy_ai`，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM`。分配器差分回退：`TORCH_ALLOCATOR_DELTA_NOT_DRAM`，列 `proxy_bytes` |
+| 实测带宽和 ridge | `measured_hbm_bandwidth_bytes_per_s`、`measured_ridge_flops_per_byte`。copy 估计文件不填这两列 |
 | MemMode 与 ComputeMode 的 kernel 时延 | 本仓库不产生。`fusion_proxy.csv` 是带 `honesty` 列的代理 |
 | SCIC 相对孤立 Nsight AI 的准确率 | 仅当 `agreement.json` 里 `quote_as_scic_accuracy` 为 true |
 | 计划切换开销、tokens/s | 论文实验，TBD |

@@ -21,6 +21,17 @@
     "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
     "peak_source": "datasheet"
   },
+  "A40_FP16": {
+    "N": 4096.0,
+    "K": 4096.0,
+    "elem_bytes": 2.0,
+    "ridge": 215.08620689655172,
+    "M_memory_edge_0.5R": 113.50330752177987,
+    "M_star_AI_equals_ridge": 240.32584259093773,
+    "M_compute_edge_2R": 544.5531470469126,
+    "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+    "peak_source": "datasheet"
+  },
   "H100_SXM_FP8": {
     "N": 4096.0,
     "K": 4096.0,

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "package_version": "0.1.0",
+  "package_version": "0.2.0",
   "thesis": "Operator intensity is shape-dependent; fusion must be plan-polymorphic across the Roofline ridge.",
   "non_contributions": [
     "Stage-Stream",
@@ -8,9 +8,9 @@
     "emitted CUDA kernels for MemMode or ComputeMode"
   ],
   "gpu_measurement_status": "PARTIAL_VENDOR_MATMUL",
-  "machine": "H100_SXM_FP16",
-  "ridge_flops_per_byte": 295.2238805970149,
-  "peak_source": "NVIDIA H100 SXM datasheet, dense FP16 Tensor Core, HBM3 3.35 TB/s",
+  "machine": "A40_FP16",
+  "ridge_flops_per_byte": 215.08620689655172,
+  "peak_source": "NVIDIA A40 datasheet, dense FP16 Tensor Core with FP16 accumulate 149.7 TFLOP/s (structural sparsity 299.4 unused), GDDR6 696 GB/s",
   "thresholds": {
     "mem_frac": 0.5,
     "compute_frac": 2.0
@@ -37,6 +37,17 @@
       "M_memory_edge_0.5R": 79.47715748163125,
       "M_star_AI_equals_ridge": 165.37193778675896,
       "M_compute_edge_2R": 359.79674943241196,
+      "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+      "peak_source": "datasheet"
+    },
+    "A40_FP16": {
+      "N": 4096.0,
+      "K": 4096.0,
+      "elem_bytes": 2.0,
+      "ridge": 215.08620689655172,
+      "M_memory_edge_0.5R": 113.50330752177987,
+      "M_star_AI_equals_ridge": 240.32584259093773,
+      "M_compute_edge_2R": 544.5531470469126,
       "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
       "peak_source": "datasheet"
     },
@@ -149,7 +160,7 @@
         4096
       ],
       "AI_fp16": 122.88,
-      "regime": "memory-bound",
+      "regime": "ridge-region",
       "vs_H100": "memory-bound"
     },
     {
@@ -160,7 +171,7 @@
         12288
       ],
       "AI_fp16": 122.88,
-      "regime": "memory-bound",
+      "regime": "ridge-region",
       "vs_H100": "memory-bound"
     },
     {
@@ -283,10 +294,10 @@
   ],
   "plan_counts": {
     "primary": {
-      "ComputeMode": 12,
-      "MemMode": 35
+      "ComputeMode": 16,
+      "MemMode": 31
     },
-    "emit_both": 8,
+    "emit_both": 10,
     "rows": 47,
     "kernels_emitted": 0
   },
@@ -298,32 +309,72 @@
     "placeholder": false,
     "note": "Latency of torch.matmul only. Not a fused-kernel comparison. nsight_dram_bytes and achieved_ai are TBD.",
     "warning": null,
-    "bench_level": "h100",
+    "bench_level": "a40",
     "what_was_timed": "torch.matmul or numpy matmul; not MemMode/ComputeMode kernels",
+    "profile": "torch",
     "nsight_dram_bytes": null,
+    "nsight_rows_filled": 0,
     "nsight_status": "TBD_RUN_PROFILER",
     "measured_hbm_bandwidth_bytes_per_s": null,
     "measured_ridge_flops_per_byte": null,
-    "achieved_tflops_max": 115.4064721119588,
+    "achieved_tflops_max": 115.01552661761667,
     "datasheet_h100_fp16_tflops": 989.0,
-    "fraction_of_h100_fp16_datasheet_peak": 0.11669006280278948
+    "fraction_of_h100_fp16_datasheet_peak": 0.11629476907746883,
+    "requested_machine": "A40_FP16",
+    "requested_ridge_flops_per_byte": 215.08620689655172,
+    "requested_peak_source": "NVIDIA A40 datasheet, dense FP16 Tensor Core with FP16 accumulate 149.7 TFLOP/s (structural sparsity 299.4 unused), GDDR6 696 GB/s",
+    "datasheet_requested_tflops": 149.7,
+    "fraction_of_requested_datasheet_peak": 0.7683067910328436,
+    "regime_label_note": "regime_vs_h100_datasheet uses the H100 SXM FP16 datasheet ridge even when the GPU is not an H100. regime_vs_requested_datasheet uses --machine. Neither column is a measured ridge. achieved_ai is set only from Nsight DRAM bytes. proxy_ai from torch.profiler is allocator memory and is not achieved AI."
   },
   "bench_rows": 7,
   "cpu_proxy_rows": 0,
+  "decision_agreement": {
+    "n_shapes": 7,
+    "n_with_byte_ai": 0,
+    "n_nsight_dram_isolated": 0,
+    "n_nsight_process_sum": 0,
+    "n_torch_profiler_memory": 0,
+    "regime_agreement_rate_any_byte_source": null,
+    "decision_agreement_rate_any_byte_source": null,
+    "n_decision_flips_any_byte_source": 0,
+    "regime_agreement_rate_nsight_isolated": null,
+    "decision_agreement_rate_nsight_isolated": null,
+    "regime_agreement_rate_nsight_process_sum": null,
+    "decision_agreement_rate_nsight_process_sum": null,
+    "scic_accuracy_status": "TBD_NO_MEASURED_AI",
+    "quote_as_scic_accuracy": false,
+    "kernel_emitted": 0,
+    "note": "quote_as_scic_accuracy is true only for isolated Nsight DRAM (status NSIGHT_DRAM). A process-sum Nsight capture and a torch profiler memory estimate still produce rates so the next run has a number to inspect; do not put those rates in the paper as SCIC accuracy. The ridge is still the datasheet ridge."
+  },
+  "fusion_proxy": {
+    "ran": true,
+    "status": "PROXY_NOT_FUSED_GEMM",
+    "claims_memmode_kernel": false,
+    "claims_computemode_kernel": false,
+    "claims_stage_stream": false,
+    "triton_used": false,
+    "torch_compile_used": true,
+    "placeholder": false,
+    "backend": "cuda-torch",
+    "device_name": "NVIDIA A40",
+    "note": "Proxy only. Two-kernel matmul+RMSNorm versus an eager chain and, when it runs, torch.compile. Bias+GELU compares two eager ops with one Python expression and, if importable, one Triton elementwise kernel. None of these is a fused GEMM, MemMode, ComputeMode, or Stage-Stream. Do not report the time ratio as a fusion speedup."
+  },
   "still_tbd": [
-    "Nsight DRAM bytes and achieved AI for each bench shape",
-    "Measured HBM bandwidth and a measured ridge (datasheet ridge is not a substitute)",
-    "MemMode vs ComputeMode kernel latencies (this repo does not emit those kernels)",
-    "SCIC agreement rate against measured AI",
+    "Nsight DRAM bytes and achieved AI for each bench shape (torch.profiler memory is not a substitute)",
+    "Measured HBM or GDDR bandwidth and a measured ridge (a datasheet ridge is not a substitute)",
+    "MemMode vs ComputeMode kernel latencies (fusion_proxy.csv is a proxy and does not emit those kernels)",
+    "SCIC accuracy against isolated Nsight DRAM AI (proxy and process-sum agreement rates are not this number)",
     "Plan-switch overhead on a serving trace",
     "End-to-end tokens/s on a model",
-    "CUDA launch latency; 5 \u00b5s is only a sensitivity knob"
+    "CUDA launch latency; 5 \u00b5s is only a sensitivity knob",
+    "Attention epilogue kernels, MoE weight-dispatch policy, and measured FP8 or W8A8 peaks"
   ],
   "repro": {
     "python": "3.10.12",
     "platform": "Linux-3.10.0-1160.119.1.el7.x86_64-x86_64-with-glibc2.35",
-    "command": "/root/test/shapefuse/__main__.py all --out /root/test/results/a40 --device cuda --require-cuda --bench-level h100 --machine H100_SXM_FP16",
+    "command": "/root/test/shapefuse/__main__.py all --out /root/test/results/a40 --device cuda --require-cuda --bench-level a40 --machine A40_FP16 --profile torch --fusion-proxy",
     "requested_device": "cuda",
-    "bench_level": "h100"
+    "bench_level": "a40"
   }
 }

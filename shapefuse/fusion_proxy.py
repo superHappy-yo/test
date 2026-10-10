@@ -28,6 +28,17 @@ import numpy as np
 
 from shapefuse.bench import BenchContext
 
+# Triton evaluates ``tl.constexpr`` against the kernel function's module
+# globals, not the locals of the function that happens to import it. A
+# function-local ``import triton.language as tl`` raises
+# ``NameError: tl is not defined`` at the annotation (the A40 fusion proxy).
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    triton = None
+    tl = None
+
 HONESTY_TWO_KERNEL = "TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM"
 HONESTY_EAGER = "EAGER_CHAIN_STILL_SEPARATE_OPS"
 HONESTY_COMPILE = "TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED"
@@ -267,13 +278,11 @@ def _triton_row(ctx, label, m, n, k, c, bias, unfused, repeats, warmup, cuda, dt
             ),
             False,
         )
-    try:
-        import triton  # noqa: F401
-    except ImportError as exc:
+    if not _ensure_triton():
         return (
             _row(
                 ctx, label, m, n, k, "bias_gelu", "triton", HONESTY_TRITON_UNAVAILABLE,
-                None, unfused, dtype_name, False, str(exc),
+                None, unfused, dtype_name, False, "triton is not installed",
             ),
             False,
         )
@@ -297,10 +306,44 @@ def _triton_row(ctx, label, m, n, k, c, bias, unfused, repeats, warmup, cuda, dt
     )
 
 
-def _triton_bias_act_launcher():
-    import torch
-    import triton
-    import triton.language as tl
+def _ensure_triton() -> bool:
+    """Import Triton and bind ``tl`` on this module.
+
+    Binding ``globals()['tl']`` is required. ``@triton.jit`` reparses the
+    kernel source and evaluates ``tl.constexpr`` with the module globals
+    only. An import that stays in a function's locals reproduces
+    ``NameError('tl is not defined')``.
+    """
+    global triton, tl
+    if triton is not None and tl is not None:
+        globals()["tl"] = tl
+        globals()["triton"] = triton
+        return True
+    try:
+        import triton as triton_mod
+        import triton.language as tl_mod
+    except ImportError:
+        return False
+    triton = triton_mod
+    tl = tl_mod
+    globals()["triton"] = triton_mod
+    globals()["tl"] = tl_mod
+    return True
+
+
+_BIAS_GELU_KERNEL = None
+
+
+def _bias_gelu_kernel():
+    """Elementwise bias + approximate GELU. Not a fused GEMM.
+
+    ``tl`` is the module global from ``import triton.language as tl``.
+    """
+    global _BIAS_GELU_KERNEL
+    if _BIAS_GELU_KERNEL is not None:
+        return _BIAS_GELU_KERNEL
+    if not _ensure_triton():
+        raise ImportError("triton is not installed")
 
     @triton.jit
     def _kernel(x_ptr, bias_ptr, out_ptr, n, BLOCK: tl.constexpr):
@@ -310,6 +353,15 @@ def _triton_bias_act_launcher():
         # Approximate GELU via sigmoid. One elementwise kernel, not a GEMM.
         s = 1.0 / (1.0 + tl.exp(-1.702 * z))
         tl.store(out_ptr + offs, z * s, mask=mask)
+
+    _BIAS_GELU_KERNEL = _kernel
+    return _kernel
+
+
+def _triton_bias_act_launcher():
+    import torch
+
+    kernel = _bias_gelu_kernel()
 
     def launch(x, bias):
         flat_x = x.reshape(-1)
@@ -324,7 +376,7 @@ def _triton_bias_act_launcher():
         n = flat_x.numel()
         block = 1024
         grid = (triton.cdiv(n, block),)
-        _kernel[grid](flat_x, bias_full, out, n, BLOCK=block)
+        kernel[grid](flat_x, bias_full, out, n, BLOCK=block)
         return out.view_as(x)
 
     return launch

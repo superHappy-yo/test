@@ -25,24 +25,25 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | `quant_epilogue.csv` | mixed-dtype byte what-if |
 | `dual_plans.csv` | MemMode / ComputeMode decisions; `kernel_emitted` is false |
 | `crossings.json` | M at 0.5 R, R, and 2 R |
-| `bench_gemm.csv` | vendor matmul latency. `achieved_ai` is empty unless Nsight JSON was passed. `proxy_ai` is torch.profiler allocator memory when `--profile torch` |
+| `bench_gemm.csv` | vendor matmul latency. `achieved_ai` is empty unless Nsight JSON was passed. `proxy_ai` is allocator memory when `--profile torch`: profiler events (`TORCH_PROFILER_MEMORY_NOT_DRAM`) or, if those events are empty, a caching-allocator delta (`TORCH_ALLOCATOR_DELTA_NOT_DRAM`). Neither is DRAM |
 | `decision_log.csv` | analytical dual-plan decision for each bench shape, plus byte-derived regime when a byte AI exists |
 | `agreement.json` | agreement rates. `quote_as_scic_accuracy` is true only for status `NSIGHT_DRAM` |
 | `fusion_proxy.csv` | present when `--fusion-proxy` is set. Read `honesty`. Not MemMode or ComputeMode |
 | `gpu_measurements.json` | device metadata, agreement summary, fusion-proxy summary, explicit nulls |
 | `summary.json` | machine, crossings, highlights, TBD list |
 | `fig_*.png` | analytical figures, plus `fig_vendor_matmul_tflops.png` when a bench ran |
-| `nsight_dram.json` | optional, from `scripts/nsight_dram.sh`. Not written by the CLI itself |
+| `nsight_dram.json` | optional, from `scripts/nsight_dram.sh`. Not written by the CLI itself. Strongly recommended via `TRY_NSIGHT=1`. If `ncu` is missing, `scripts/run_a40.sh` writes `nsight_skipped.txt` instead |
+| `bandwidth_estimate.json` | optional copy-kernel estimate from `scripts/bandwidth_probe.sh`. Status `ESTIMATE_COPY_NOT_NSIGHT`. Not a measured ridge |
 | `SEND_BACK.txt` | checklist of what to return |
 
 ## Fields that stay empty until a human measures them
 
 - `achieved_ai`, until a Nsight JSON is ingested (`--nsight-json` or `TRY_NSIGHT=1`)
-- `proxy_ai` is allowed to be filled by `--profile torch` and must stay labeled `TORCH_PROFILER_MEMORY_NOT_DRAM`
-- `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte`
+- `proxy_ai` is allowed to be filled by `--profile torch`. Profiler events stay labeled `TORCH_PROFILER_MEMORY_NOT_DRAM`. A caching-allocator fallback is `TORCH_ALLOCATOR_DELTA_NOT_DRAM`. `TORCH_PROFILER_EMPTY` means neither source produced bytes. None of these is DRAM
+- `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte` (a copy-kernel estimate does not fill these; see `bandwidth_estimate.json`)
 - `measured_winner` in `dual_plans.csv`
 - MemMode versus ComputeMode kernel time (no such kernel is emitted; `fusion_proxy.csv` does not count)
 - end-to-end tokens/s
 - `quote_as_scic_accuracy` stays false for profiler memory and for `NSIGHT_DRAM_PROCESS_SUM`
 
-Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency. `--machine a40` selects the A40 datasheet preset (149.7 TFLOP/s, 696 GB/s). That preset is not a measured ridge. The archived A40 matmul sweep used `--machine H100_SXM_FP16`, so its regime column is the H100 datasheet.
+Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. `ncu` is Nsight Compute, separate from the driver; if it is missing, `scripts/run_a40.sh` writes `nsight_skipped.txt` when `TRY_NSIGHT=1` and leaves `achieved_ai` empty. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency. `--machine a40` selects the A40 datasheet preset (149.7 TFLOP/s, 696 GB/s). That preset is not a measured ridge. The archived second A40 package used `--machine A40_FP16`. Its regime column is that datasheet, Nsight was not captured, and `quote_as_scic_accuracy` is false.

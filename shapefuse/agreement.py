@@ -15,7 +15,12 @@ from __future__ import annotations
 from shapefuse.intensity import gemm_flops
 from shapefuse.machines import Machine
 from shapefuse.plans import select_plan
-from shapefuse.profiler_hooks import NSIGHT_AI_STATUSES, STRICT_NSIGHT_STATUSES, TORCH_MEMORY
+from shapefuse.profiler_hooks import (
+    NSIGHT_AI_STATUSES,
+    STRICT_NSIGHT_STATUSES,
+    TORCH_ALLOCATOR_DELTA,
+    TORCH_MEMORY,
+)
 from shapefuse.scic import Site, classify_site
 
 
@@ -75,7 +80,8 @@ def build_decision_log(bench_rows: list[dict], machine: Machine) -> list[dict]:
                 "note": (
                     "Analytical plan is SCIC on the datasheet ridge. "
                     "byte_* uses Nsight DRAM AI when status is NSIGHT_DRAM or "
-                    "NSIGHT_DRAM_PROCESS_SUM, else torch.profiler memory AI. "
+                    "NSIGHT_DRAM_PROCESS_SUM, else torch.profiler memory AI "
+                    "or a caching-allocator delta. Neither proxy is DRAM. "
                     "Only NSIGHT_DRAM is valid SCIC accuracy. "
                     "MemMode and ComputeMode kernels are not timed."
                 ),
@@ -89,14 +95,18 @@ def summarize_agreement(log_rows: list[dict]) -> dict:
     strict = [row for row in comparable if row["byte_ai_status"] in STRICT_NSIGHT_STATUSES]
     process = [row for row in comparable if row["byte_ai_status"] in NSIGHT_AI_STATUSES]
     proxy = [row for row in comparable if row["byte_ai_status"] == TORCH_MEMORY]
+    allocator = [row for row in comparable if row["byte_ai_status"] == TORCH_ALLOCATOR_DELTA]
     if strict:
         status = "NSIGHT_DRAM"
         quote = True
     elif process:
         status = "NSIGHT_DRAM_PROCESS_SUM_NOT_ISOLATED_KERNEL"
         quote = False
-    elif proxy:
+    elif proxy and not allocator:
         status = "PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY"
+        quote = False
+    elif allocator and not proxy:
+        status = "PROXY_ALLOCATOR_DELTA_NOT_VALID_SCIC_ACCURACY"
         quote = False
     elif comparable:
         status = "BYTE_AI_PRESENT_NOT_VALID_SCIC_ACCURACY"
@@ -110,6 +120,7 @@ def summarize_agreement(log_rows: list[dict]) -> dict:
         "n_nsight_dram_isolated": len(strict),
         "n_nsight_process_sum": len(process),
         "n_torch_profiler_memory": len(proxy),
+        "n_torch_allocator_delta": len(allocator),
         "regime_agreement_rate_any_byte_source": _rate(comparable, "regime_agree"),
         "decision_agreement_rate_any_byte_source": _rate(comparable, "decision_agree"),
         "n_decision_flips_any_byte_source": _count_flips(comparable),
@@ -122,10 +133,11 @@ def summarize_agreement(log_rows: list[dict]) -> dict:
         "kernel_emitted": 0,
         "note": (
             "quote_as_scic_accuracy is true only for isolated Nsight DRAM "
-            "(status NSIGHT_DRAM). A process-sum Nsight capture and a torch "
-            "profiler memory estimate still produce rates so the next run has "
-            "a number to inspect; do not put those rates in the paper as "
-            "SCIC accuracy. The ridge is still the datasheet ridge."
+            "(status NSIGHT_DRAM). A process-sum Nsight capture, a torch "
+            "profiler memory estimate, and a caching-allocator delta still "
+            "produce rates so the next run has a number to inspect; do not "
+            "put those rates in the paper as SCIC accuracy. The ridge is "
+            "still the datasheet ridge."
         ),
     }
 

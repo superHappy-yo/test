@@ -7,11 +7,22 @@ import unittest
 from pathlib import Path
 
 from shapefuse.agreement import build_decision_log, summarize_agreement
+from shapefuse.bandwidth_probe import ESTIMATE_STATUS, estimate_from_timing
 from shapefuse.cli import main
 from shapefuse.fusion_proxy import HONESTY_BIAS_HAND, HONESTY_TWO_KERNEL
 from shapefuse.intensity import gemm_bytes, gemm_flops
 from shapefuse.machines import A40_FP16, get_machine
-from shapefuse.profiler_hooks import NSIGHT_DRAM, NSIGHT_PROCESS_SUM, parse_ncu_csv
+from shapefuse.profiler_hooks import (
+    NSIGHT_DRAM,
+    NSIGHT_PROCESS_SUM,
+    TORCH_ALLOCATOR_DELTA,
+    TORCH_EMPTY,
+    TORCH_MEMORY,
+    bytes_from_profiler_events,
+    chrome_trace_memory_net,
+    collect_proxy_bytes,
+    parse_ncu_csv,
+)
 
 
 class NextRunTests(unittest.TestCase):
@@ -116,6 +127,193 @@ class NextRunTests(unittest.TestCase):
             bench = (dest / "bench_gemm.csv").read_text(encoding="utf-8")
             self.assertIn("regime_vs_requested_datasheet", bench)
             self.assertIn("A40_FP16", bench)
+            self.assertIn("proxy_byte_source", bench)
+            send = (dest / "SEND_BACK.txt").read_text(encoding="utf-8")
+            self.assertIn("TRY_NSIGHT=1", send)
+            self.assertIn("PROXY_TIMING_NOT_A_FUSION_SPEEDUP", send)
+            self.assertIn("ESTIMATE_COPY_NOT_NSIGHT", send)
+            self.assertIn("ncu", send)
+
+    def test_profiler_reads_device_memory_field(self) -> None:
+        # PyTorch 2.5 key_averages() has self_device_memory_usage and does
+        # not define self_cuda_memory_usage. getattr(..., default 0) was empty.
+        events = [_Evt(self_device_memory_usage=4096, device_memory_usage=8192)]
+        nbytes, source = bytes_from_profiler_events(events, cuda=True)
+        self.assertEqual(nbytes, 4096)
+        self.assertIn("self_device_memory_usage", source)
+
+    def test_legacy_cuda_memory_name_still_counts(self) -> None:
+        events = [_Evt(self_cuda_memory_usage=2048)]
+        nbytes, source = bytes_from_profiler_events(events, cuda=True)
+        self.assertEqual(nbytes, 2048)
+        self.assertIn("self_device_memory_usage", source)
+
+    def test_chrome_trace_net_is_profiler_not_allocator_delta(self) -> None:
+        text = json.dumps(
+            {
+                "traceEvents": [
+                    {"name": "[memory]", "args": {"Bytes": 100, "Device Type": 1}},
+                    {"name": "[memory]", "args": {"Bytes": -40, "Device Type": 1}},
+                    {"name": "[memory]", "args": {"Bytes": 999, "Device Type": 0}},
+                ]
+            }
+        )
+        self.assertEqual(chrome_trace_memory_net(text, cuda=True), 60)
+        chosen = collect_proxy_bytes(
+            events=[_Evt(self_device_memory_usage=0, device_memory_usage=0)],
+            chrome_trace=text,
+            allocator_delta=5,
+            cuda=True,
+        )
+        self.assertEqual(chosen["status"], TORCH_MEMORY)
+        self.assertEqual(chosen["bytes"], 60.0)
+        self.assertEqual(chosen["source"], "chrome_trace.memory")
+        self.assertNotIn("NSIGHT", chosen["status"])
+
+    def test_allocator_delta_keeps_a_distinct_status(self) -> None:
+        chosen = collect_proxy_bytes(
+            events=[_Evt(self_device_memory_usage=0, device_memory_usage=0)],
+            chrome_trace="{}",
+            allocator_delta=8192,
+            cuda=True,
+        )
+        self.assertEqual(chosen["status"], TORCH_ALLOCATOR_DELTA)
+        self.assertEqual(chosen["bytes"], 8192.0)
+        self.assertNotEqual(chosen["status"], TORCH_MEMORY)
+        empty = collect_proxy_bytes(
+            events=[_Evt(self_device_memory_usage=0)],
+            chrome_trace="{}",
+            allocator_delta=0,
+            cuda=True,
+        )
+        self.assertEqual(empty["status"], TORCH_EMPTY)
+        self.assertIsNone(empty["bytes"])
+
+    def test_allocator_delta_is_not_scic_accuracy(self) -> None:
+        machine = get_machine("a40")
+        row = _bench_row("decode_gemv", 1, None, "TBD_NSIGHT")
+        row["proxy_ai"] = 12.0
+        row["proxy_ai_status"] = TORCH_ALLOCATOR_DELTA
+        summary = summarize_agreement(build_decision_log([row], machine))
+        self.assertFalse(summary["quote_as_scic_accuracy"])
+        self.assertEqual(summary["n_torch_profiler_memory"], 0)
+        self.assertEqual(summary["n_torch_allocator_delta"], 1)
+        self.assertIn("NOT_VALID_SCIC_ACCURACY", summary["scic_accuracy_status"])
+        self.assertNotIn("NSIGHT_DRAM", summary["scic_accuracy_status"])
+
+    def test_triton_tl_is_visible_as_a_module_global(self) -> None:
+        import ast
+        import importlib
+        import inspect
+        import sys
+        import textwrap
+        import types
+
+        import shapefuse.fusion_proxy as fusion_proxy
+
+        language = types.ModuleType("triton.language")
+
+        class _Constexpr:
+            pass
+
+        language.constexpr = _Constexpr
+        triton_mod = types.ModuleType("triton")
+        seen: dict[str, object] = {}
+
+        def jit(fn):
+            src = textwrap.dedent(inspect.getsource(fn))
+            tree = ast.parse(src)
+            fndef = tree.body[0]
+            self.assertIsInstance(fndef, ast.FunctionDef)
+            evaluated = None
+            for arg in fndef.args.args:
+                if arg.annotation is None:
+                    continue
+                segment = ast.get_source_segment(src, arg.annotation)
+                # Triton uses the kernel globals, not the enclosing function locals.
+                evaluated = eval(segment, fn.__globals__)  # noqa: S307
+            seen["annotation"] = evaluated
+            return fn
+
+        triton_mod.jit = jit
+        triton_mod.language = language
+        triton_mod.cdiv = lambda n, block: (n + block - 1) // block
+        saved = {name: sys.modules.get(name) for name in ("triton", "triton.language")}
+        sys.modules["triton"] = triton_mod
+        sys.modules["triton.language"] = language
+        try:
+            reloaded = importlib.reload(fusion_proxy)
+            reloaded._BIAS_GELU_KERNEL = None
+            reloaded._bias_gelu_kernel()
+            self.assertIs(seen["annotation"], _Constexpr)
+            self.assertIn("tl", reloaded._bias_gelu_kernel.__globals__)
+        finally:
+            for name, module in saved.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+            importlib.reload(fusion_proxy)
+
+    def test_copy_bandwidth_estimate_is_not_a_measured_ridge(self) -> None:
+        payload = estimate_from_timing(
+            seconds=0.5,
+            repeats=4,
+            numel=1000,
+            element_bytes=2,
+            datasheet_peak_flops_per_s=149.7e12,
+        )
+        self.assertEqual(payload["status"], ESTIMATE_STATUS)
+        self.assertEqual(payload["bytes_moved"], 16000)
+        self.assertEqual(payload["estimated_bandwidth_bytes_per_s"], 32000.0)
+        self.assertAlmostEqual(payload["estimated_ridge_flops_per_byte"], 149.7e12 / 32000.0)
+        self.assertIsNone(payload["measured_hbm_bandwidth_bytes_per_s"])
+        self.assertIsNone(payload["measured_ridge_flops_per_byte"])
+        self.assertTrue(payload["not_nsight"])
+        self.assertTrue(payload["not_a_measured_ridge"])
+        self.assertTrue(payload["do_not_write_measured_ridge_flops_per_byte"])
+
+    def test_run_a40_script_recommends_nsight_and_documents_missing_ncu(self) -> None:
+        script = Path(__file__).resolve().parents[1].joinpath("scripts", "run_a40.sh").read_text(encoding="utf-8")
+        self.assertIn("TRY_NSIGHT=1", script)
+        self.assertIn("ncu: NOT on PATH", script)
+        self.assertIn("nsight_skipped.txt", script)
+        self.assertIn("Nsight Compute", script)
+        self.assertIn("bandwidth_estimate.json", script)
+        probe = Path(__file__).resolve().parents[1].joinpath("scripts", "bandwidth_probe.sh").read_text(encoding="utf-8")
+        self.assertIn("ESTIMATE_COPY_NOT_NSIGHT", probe)
+
+    def test_paper_quotes_second_a40_package(self) -> None:
+        import csv
+
+        root = Path(__file__).resolve().parents[1]
+        draft = (root / "paper" / "draft.md").read_text(encoding="utf-8")
+        zh = (root / "paper" / "zh_outline.md").read_text(encoding="utf-8")
+        with (root / "paper" / "data" / "a40" / "bench_gemm.csv").open(encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            self.assertIn(row["achieved_tflops"], draft)
+            self.assertIn(row["achieved_tflops"], zh)
+            self.assertEqual(row["proxy_ai_status"], "TORCH_PROFILER_EMPTY")
+            self.assertEqual(row["requested_machine"], "A40_FP16")
+        summary = json.loads((root / "paper" / "data" / "a40" / "summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["machine"], "A40_FP16")
+        self.assertEqual(summary["gpu_measurement_status"], "PARTIAL_VENDOR_MATMUL")
+        self.assertEqual(summary["bench"]["nsight_status"], "TBD_RUN_PROFILER")
+        self.assertFalse(summary["decision_agreement"]["quote_as_scic_accuracy"])
+        self.assertEqual(summary["decision_agreement"]["scic_accuracy_status"], "TBD_NO_MEASURED_AI")
+        self.assertIn("PROXY_TIMING_NOT_A_FUSION_SPEEDUP", draft)
+        self.assertIn("NameError('tl is not defined')", draft)
+        self.assertIn("TRY_NSIGHT=1", draft)
+        self.assertIn("ESTIMATE_COPY_NOT_NSIGHT", draft)
+        fraction = "0.7683067910328436"
+        self.assertIn(fraction, draft)
+        self.assertIn(fraction, zh)
+        crossings = json.loads((root / "paper" / "data" / "a40" / "crossings.json").read_text(encoding="utf-8"))
+        star = "240.32584259093773"
+        self.assertEqual(crossings["A40_FP16"]["M_star_AI_equals_ridge"], float(star))
+        self.assertIn(star, draft)
+        self.assertIn(star, zh)
 
     def test_cli_ingests_nsight_json_on_cpu_timing(self) -> None:
         import tempfile
@@ -160,6 +358,12 @@ class NextRunTests(unittest.TestCase):
             gpu = json.loads((dest / "gpu_measurements.json").read_text(encoding="utf-8"))
             self.assertEqual(gpu["status"], "PLACEHOLDER_NO_GPU")
             self.assertTrue(gpu["do_not_treat_as_fused_kernel_study"])
+
+
+class _Evt:
+    def __init__(self, **kwargs: object) -> None:
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 def _bench_row(label: str, m: int, achieved_ai: float | None, status: str) -> dict:

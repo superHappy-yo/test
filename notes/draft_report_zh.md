@@ -2,7 +2,7 @@
 
 下文是研究笔记原稿，保留以便对照。仓库里的 `shapefuse` 和 `paper/draft.md` 以代码中的公式为准。
 
-2026-10 补记：服务器上有一次 NVIDIA A40 的 `torch.matmul` 扫描，状态 `PARTIAL_VENDOR_MATMUL`，归档在 `paper/data/a40/`。计时的不是融合 kernel。那次命令的 `--machine` 是 `H100_SXM_FP16`，所以 regime 列用的是 H100 数据手册，不是 A40 实测 ridge。数字和边界见 `paper/draft.md` §7.2 与 `paper/zh_outline.md` §7。下文「本机无 GPU」是原稿当时的标注。
+2026-10 补记：服务器上的第二次 NVIDIA A40 包归档在 `paper/data/a40/`，状态 `PARTIAL_VENDOR_MATMUL`，命令是 `--machine A40_FP16`。计时的是 `torch.matmul`，另有一份 fusion proxy，时间比不是融合加速。Nsight 没抓（`TBD_RUN_PROFILER`），`quote_as_scic_accuracy` 为 false。数字和边界见 `paper/draft.md` §7.2 与 `paper/zh_outline.md` §7。下文「本机无 GPU」是原稿当时的标注。
 
 原稿 §1.4 和 §4 写「小 M 时，不融合的 epilogue 往返占 GEMM 流量的比例更高」。冷缓存模型不是这样：
 

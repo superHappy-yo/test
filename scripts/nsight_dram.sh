@@ -26,8 +26,10 @@ mkdir -p "$OUT"
 
 if ! command -v ncu >/dev/null 2>&1; then
   echo "ERROR: ncu not on PATH."
-  echo "Install Nsight Compute, or leave TRY_NSIGHT unset and use --profile torch."
-  echo "torch.profiler memory is not DRAM bytes."
+  echo "Nsight Compute (ncu) is a separate package from the CUDA driver and from nvidia-smi."
+  echo "Install it, then confirm with: ncu --version"
+  echo "The matmul sweep does not need ncu. DRAM bytes and achieved AI do."
+  echo "torch.profiler memory is not DRAM bytes, and the copy-kernel probe is not Nsight."
   echo "List metrics once ncu exists: ncu --query-metrics | grep dram__bytes"
   exit 1
 fi
