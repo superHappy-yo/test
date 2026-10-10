@@ -1,0 +1,35 @@
+{
+  "H100_SXM_FP16": {
+    "N": 4096.0,
+    "K": 4096.0,
+    "elem_bytes": 2.0,
+    "ridge": 295.2238805970149,
+    "M_memory_edge_0.5R": 159.07764321505425,
+    "M_star_AI_equals_ridge": 344.94907864709285,
+    "M_compute_edge_2R": 829.6354550667648,
+    "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+    "peak_source": "datasheet"
+  },
+  "A100_SXM80_FP16": {
+    "N": 4096.0,
+    "K": 4096.0,
+    "elem_bytes": 2.0,
+    "ridge": 153.01618440411966,
+    "M_memory_edge_0.5R": 79.47715748163125,
+    "M_star_AI_equals_ridge": 165.37193778675896,
+    "M_compute_edge_2R": 359.79674943241196,
+    "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+    "peak_source": "datasheet"
+  },
+  "H100_SXM_FP8": {
+    "N": 4096.0,
+    "K": 4096.0,
+    "elem_bytes": 1.0,
+    "ridge": 590.7462686567164,
+    "M_memory_edge_0.5R": 159.16431696263774,
+    "M_star_AI_equals_ridge": 345.15286222812665,
+    "M_compute_edge_2R": 830.2249170387972,
+    "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+    "peak_source": "datasheet"
+  }
+}

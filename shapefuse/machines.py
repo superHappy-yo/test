@@ -63,16 +63,45 @@ A100_SXM80_FP16 = Machine(
     source="NVIDIA A100 80GB SXM datasheet, dense FP16 Tensor Core, HBM2e 2039 GB/s",
 )
 
+# A40: dense FP16 Tensor Core 149.7 TFLOP/s (sparsity 299.4 is not used),
+# GDDR6 696 GB/s. Datasheet, not a measured ridge from any run in this repo.
+A40_FP16 = Machine(
+    name="A40_FP16",
+    peak_flops_per_s=149.7e12,
+    peak_bytes_per_s=696e9,
+    peak_dtype="fp16",
+    source=(
+        "NVIDIA A40 datasheet, dense FP16 Tensor Core with FP16 accumulate "
+        "149.7 TFLOP/s (structural sparsity 299.4 unused), GDDR6 696 GB/s"
+    ),
+)
+
 MACHINES: dict[str, Machine] = {
     H100_SXM_FP16.name: H100_SXM_FP16,
     H100_SXM_FP8.name: H100_SXM_FP8,
     A100_SXM80_FP16.name: A100_SXM80_FP16,
+    A40_FP16.name: A40_FP16,
+}
+
+# Short names for the CLI. They resolve to the datasheet anchors above.
+ALIASES: dict[str, str] = {
+    "h100": H100_SXM_FP16.name,
+    "h100_fp16": H100_SXM_FP16.name,
+    "h100_fp8": H100_SXM_FP8.name,
+    "a100": A100_SXM80_FP16.name,
+    "a100_fp16": A100_SXM80_FP16.name,
+    "a40": A40_FP16.name,
+    "a40_fp16": A40_FP16.name,
 }
 
 
 def get_machine(name: str) -> Machine:
     key = name.strip()
-    if key not in MACHINES:
-        known = ", ".join(sorted(MACHINES))
-        raise KeyError(f"Unknown machine {name!r}. Known: {known}")
-    return MACHINES[key]
+    if key in MACHINES:
+        return MACHINES[key]
+    alias = ALIASES.get(key) or ALIASES.get(key.lower())
+    if alias is not None:
+        return MACHINES[alias]
+    known = ", ".join(sorted(MACHINES))
+    aliases = ", ".join(sorted(ALIASES))
+    raise KeyError(f"Unknown machine {name!r}. Known: {known}. Aliases: {aliases}")

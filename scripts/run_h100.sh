@@ -33,12 +33,21 @@ if ! "$PYTHON" -c "import torch; raise SystemExit(0 if torch.cuda.is_available()
   exit 1
 fi
 
+# Optional, off by default so this script stays a matmul sweep:
+#   PROFILE=torch FUSION_PROXY=1 bash scripts/run_h100.sh
+#   TRY_NSIGHT=1 is handled by scripts/run_a40.sh; point OUT at a new directory.
+EXTRA=()
+if [[ "${FUSION_PROXY:-0}" == "1" ]]; then
+  EXTRA+=(--fusion-proxy)
+fi
 "$PYTHON" -m shapefuse all \
   --out "$OUT" \
   --device cuda \
   --require-cuda \
   --bench-level h100 \
-  --machine "${MACHINE:-H100_SXM_FP16}"
+  --machine "${MACHINE:-H100_SXM_FP16}" \
+  --profile "${PROFILE:-off}" \
+  "${EXTRA[@]}"
 
 echo
 echo "==== Send these files back for the paper ===="

@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from shapefuse.intensity import classify, gemm_ai
-from shapefuse.machines import A100_SXM80_FP16, H100_SXM_FP16
+from shapefuse.machines import A100_SXM80_FP16, A40_FP16, H100_SXM_FP16, Machine
 from shapefuse.sweeps import SweepBundle
 
 MEM = "#4C78A8"
@@ -40,6 +40,7 @@ def _gemm(bundle: SweepBundle, path: Path) -> Path:
     fig, ax = plt.subplots(figsize=(7.4, 4.6))
     ax.plot(ms, ais, "o-", color="#1F4E79", label="GEMM AI, N=K=4096, FP16 bytes")
     ax.axhline(H100_SXM_FP16.ridge, color=COMPUTE, ls="--", label=f"H100 datasheet ridge {H100_SXM_FP16.ridge:.0f}")
+    ax.axhline(A40_FP16.ridge, color=RIDGE, ls="--", label=f"A40 datasheet ridge {A40_FP16.ridge:.0f}")
     ax.axhline(A100_SXM80_FP16.ridge, color=FA, ls="--", label=f"A100 datasheet ridge {A100_SXM80_FP16.ridge:.0f}")
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
@@ -156,6 +157,62 @@ def _plans(bundle: SweepBundle, path: Path) -> Path:
     ax.set_title("Dual-plan regions for a square projection (selector stub)")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+    return path
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
+def write_vendor_matmul_figure(rows: list[dict], path: Path, machine: Machine | None = None) -> Path:
+    """Bar chart of timed matmul throughput.
+
+    The series is vendor ``matmul`` (or a CPU placeholder). It is not a
+    MemMode versus ComputeMode comparison. A datasheet peak is drawn only
+    when it sits near the measured bars; an H100 peak above an A40 trace
+    would otherwise flatten the figure.
+    """
+    usable = [r for r in rows if r.get("achieved_tflops") not in (None, "")]
+    fig, ax = plt.subplots(figsize=(7.6, 4.6))
+    if not usable:
+        ax.set_title("No matmul timings")
+        fig.tight_layout()
+        fig.savefig(path, dpi=140)
+        plt.close(fig)
+        return path
+    values = [float(r["achieved_tflops"]) for r in usable]
+    labels = [f"{r['label']}\nM={r['M']}" for r in usable]
+    ax.bar(range(len(usable)), values, color="#1F4E79")
+    ax.set_xticks(range(len(usable)), labels, fontsize=8)
+    if min(values) > 0 and max(values) / min(values) > 10:
+        ax.set_yscale("log")
+    placeholder = _as_bool(usable[0].get("placeholder"))
+    device = str(usable[0].get("device_name") or "device")
+    if placeholder:
+        title = "PLACEHOLDER matmul timing — not a GPU Roofline"
+    else:
+        title = f"{device}: torch.matmul only (PARTIAL_VENDOR_MATMUL)"
+    ax.set_ylabel("Achieved TFLOP/s")
+    ax.set_xlabel("Not MemMode vs ComputeMode. This figure has no DRAM bytes.")
+    if machine is not None and not placeholder:
+        peak = machine.peak_tflops
+        if peak <= max(values) * 3.0:
+            ax.axhline(
+                peak,
+                color=COMPUTE,
+                ls="--",
+                label=f"{machine.name} datasheet peak {peak:.1f} (not measured)",
+            )
+            ax.legend(fontsize=8)
+        else:
+            title += f"\n{machine.name} datasheet peak {peak:.1f} TFLOP/s is off-scale and not drawn"
+    ax.set_title(title)
+    ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     fig.savefig(path, dpi=140)
     plt.close(fig)

@@ -28,7 +28,7 @@ from shapefuse.intensity import (
     roofline_fusion_speedup,
     softmax_scores,
 )
-from shapefuse.machines import A100_SXM80_FP16, H100_SXM_FP8, Machine
+from shapefuse.machines import A100_SXM80_FP16, A40_FP16, H100_SXM_FP8, Machine
 from shapefuse.plans import moe_is_heterogeneous, select_plan
 from shapefuse.scic import Site, classify_site
 
@@ -114,6 +114,7 @@ def crossing_table(thresholds: Thresholds) -> dict:
     specs = (
         (H100_SXM_FP16, 2.0),
         (A100_SXM80_FP16, 2.0),
+        (A40_FP16, 2.0),
         (H100_SXM_FP8, 1.0),
     )
     out: dict = {}
@@ -186,6 +187,7 @@ def _gemm_row(
         "roofline_limit": report.roofline_limit,
         "vs_H100": classify(ai16, H100_ridge(), thresholds),
         "vs_A100": classify(ai16, A100_SXM80_FP16.ridge, thresholds),
+        "vs_A40": classify(ai16, A40_FP16.ridge, thresholds),
     }
 
 

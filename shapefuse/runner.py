@@ -7,10 +7,12 @@ import sys
 from pathlib import Path
 
 from shapefuse import __version__
+from shapefuse.agreement import build_decision_log, summarize_agreement
 from shapefuse.bench import CudaUnavailable, resolve_backend, run_bench, run_cpu_proxy_sweep
 from shapefuse.intensity import Thresholds
 from shapefuse.io_utils import write_csv, write_json
 from shapefuse.machines import get_machine
+from shapefuse.profiler_hooks import load_nsight_json
 from shapefuse.sweeps import SweepBundle, build_sweeps
 
 
@@ -34,13 +36,17 @@ def run_command(args) -> int:
     proxy_rows = None
     bench_rows = None
     bench_meta = None
+    agreement = None
+    fusion_meta = None
     if args.cmd == "all":
         try:
-            bench_rows, bench_meta = _bench(args)
+            bench_rows, bench_meta, agreement, fusion_meta = _write_bench_bundle(args, out)
         except CudaUnavailable as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
-        write_csv(out / "bench_gemm.csv", bench_rows)
+        except (KeyError, ValueError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
         if args.cpu_proxy:
             proxy_rows = run_cpu_proxy_sweep()
             write_csv(out / "gemm_M_sweep_cpu.csv", proxy_rows)
@@ -52,18 +58,12 @@ def run_command(args) -> int:
 
         names = write_figures(bundle, out, proxy_rows)
         print("figures:", ", ".join(names))
-    summary = _summary(args, bundle, bench_rows, bench_meta, proxy_rows)
+    summary = _summary(args, bundle, bench_rows, bench_meta, proxy_rows, agreement, fusion_meta)
     write_json(out / "summary.json", summary)
     if bench_meta is not None:
         write_json(
             out / "gpu_measurements.json",
-            {
-                "status": "PLACEHOLDER_NO_GPU" if bench_meta["placeholder"] else "PARTIAL_VENDOR_MATMUL",
-                "do_not_treat_as_fused_kernel_study": True,
-                "bench": bench_meta,
-                "rows_file": "bench_gemm.csv",
-                "still_tbd": _still_tbd(),
-            },
+            _gpu_payload(bench_meta, agreement, fusion_meta),
         )
     elif args.cmd != "bench":
         write_json(
@@ -72,7 +72,9 @@ def run_command(args) -> int:
                 "status": "PLACEHOLDER_NOT_RUN",
                 "do_not_treat_as_fused_kernel_study": True,
                 "bench": None,
-                "still_tbd": _still_tbd(),
+                "decision_agreement": None,
+                "fusion_proxy": None,
+                "still_tbd": _still_tbd(None, None, None),
             },
         )
     (out / "SEND_BACK.txt").write_text(_send_back(out, summary), encoding="utf-8")
@@ -83,33 +85,71 @@ def run_command(args) -> int:
 
 def _run_bench_only(args, out: Path) -> int:
     try:
-        rows, meta = _bench(args)
+        rows, meta, agreement, fusion_meta = _write_bench_bundle(args, out)
     except CudaUnavailable as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-    write_csv(out / "bench_gemm.csv", rows)
-    write_json(
-        out / "gpu_measurements.json",
-        {
-            "status": "PLACEHOLDER_NO_GPU" if meta["placeholder"] else "PARTIAL_VENDOR_MATMUL",
-            "do_not_treat_as_fused_kernel_study": True,
-            "bench": meta,
-            "rows_file": "bench_gemm.csv",
-            "still_tbd": _still_tbd(),
-        },
-    )
+    except (KeyError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    write_json(out / "gpu_measurements.json", _gpu_payload(meta, agreement, fusion_meta))
     print(f"wrote {out.resolve()}")
+    print(f"scic_accuracy_status: {agreement['scic_accuracy_status']}")
     return 0
 
 
 def _bench(args):
     ctx = resolve_backend(args.device, args.require_cuda, args.allow_cpu_fallback)
+    machine = get_machine(args.machine)
+    nsight = None
+    nsight_path = getattr(args, "nsight_json", None)
+    if nsight_path:
+        nsight = load_nsight_json(Path(nsight_path))
     if ctx.placeholder:
         print(f"NOTE: {ctx.note}")
-    rows, meta = run_bench(ctx, args.bench_level)
+    rows, meta = run_bench(
+        ctx,
+        args.bench_level,
+        machine=machine,
+        profile=getattr(args, "profile", "off"),
+        nsight_by_label=nsight,
+    )
     if meta["warning"]:
         print(f"WARNING: {meta['warning']}")
-    return rows, meta
+    return rows, meta, ctx, machine
+
+
+def _write_bench_bundle(args, out: Path):
+    rows, meta, ctx, machine = _bench(args)
+    write_csv(out / "bench_gemm.csv", rows)
+    log = build_decision_log(rows, machine)
+    write_csv(out / "decision_log.csv", log)
+    agreement = summarize_agreement(log)
+    write_json(out / "agreement.json", agreement)
+    fusion_meta = None
+    if getattr(args, "fusion_proxy", False):
+        from shapefuse.fusion_proxy import run_fusion_proxy
+
+        fusion_rows, fusion_meta = run_fusion_proxy(rows, ctx)
+        write_csv(out / "fusion_proxy.csv", fusion_rows)
+    if not args.skip_plots:
+        from shapefuse.plots import write_vendor_matmul_figure
+
+        write_vendor_matmul_figure(rows, out / "fig_vendor_matmul_tflops.png", machine)
+    return rows, meta, agreement, fusion_meta
+
+
+def _gpu_payload(meta: dict, agreement: dict | None, fusion_meta: dict | None) -> dict:
+    return {
+        "status": "PLACEHOLDER_NO_GPU" if meta["placeholder"] else "PARTIAL_VENDOR_MATMUL",
+        "do_not_treat_as_fused_kernel_study": True,
+        "bench": meta,
+        "rows_file": "bench_gemm.csv",
+        "decision_log_file": "decision_log.csv",
+        "decision_agreement": agreement,
+        "fusion_proxy": fusion_meta,
+        "still_tbd": _still_tbd(agreement, fusion_meta, meta),
+    }
 
 
 def _write_tables(out: Path, bundle: SweepBundle) -> None:
@@ -125,7 +165,7 @@ def _write_tables(out: Path, bundle: SweepBundle) -> None:
     write_json(out / "crossings.json", bundle.crossings)
 
 
-def _summary(args, bundle: SweepBundle, bench_rows, bench_meta, proxy_rows) -> dict:
+def _summary(args, bundle: SweepBundle, bench_rows, bench_meta, proxy_rows, agreement, fusion_meta) -> dict:
     if bench_meta is None:
         gpu_status = "PLACEHOLDER_NOT_RUN"
     elif bench_meta["placeholder"]:
@@ -184,7 +224,9 @@ def _summary(args, bundle: SweepBundle, bench_rows, bench_meta, proxy_rows) -> d
         "bench": bench_meta,
         "bench_rows": 0 if not bench_rows else len(bench_rows),
         "cpu_proxy_rows": len(proxy_rows) if proxy_rows else 0,
-        "still_tbd": _still_tbd(),
+        "decision_agreement": agreement,
+        "fusion_proxy": fusion_meta,
+        "still_tbd": _still_tbd(agreement, fusion_meta, bench_meta),
         "repro": {
             "python": sys.version.split()[0],
             "platform": platform.platform(),
@@ -205,16 +247,40 @@ def _plan_counts(rows: list[dict]) -> dict:
     return {"primary": primary, "emit_both": both, "rows": len(rows), "kernels_emitted": 0}
 
 
-def _still_tbd() -> list[str]:
-    return [
-        "Nsight DRAM bytes and achieved AI for each bench shape",
-        "Measured HBM bandwidth and a measured ridge (datasheet ridge is not a substitute)",
-        "MemMode vs ComputeMode kernel latencies (this repo does not emit those kernels)",
-        "SCIC agreement rate against measured AI",
-        "Plan-switch overhead on a serving trace",
-        "End-to-end tokens/s on a model",
-        "CUDA launch latency; 5 µs is only a sensitivity knob",
-    ]
+def _still_tbd(agreement, fusion_meta, bench_meta) -> list[str]:
+    items = []
+    nsight_done = bool(bench_meta) and bench_meta.get("nsight_status") in {
+        "NSIGHT_DRAM",
+        "NSIGHT_DRAM_PROCESS_SUM",
+    }
+    if not nsight_done:
+        items.append(
+            "Nsight DRAM bytes and achieved AI for each bench shape "
+            "(torch.profiler memory is not a substitute)"
+        )
+    measured_ridge = None if not bench_meta else bench_meta.get("measured_ridge_flops_per_byte")
+    if measured_ridge is None:
+        items.append(
+            "Measured HBM or GDDR bandwidth and a measured ridge "
+            "(a datasheet ridge is not a substitute)"
+        )
+    items.append(
+        "MemMode vs ComputeMode kernel latencies "
+        "(fusion_proxy.csv is a proxy and does not emit those kernels)"
+    )
+    quote = bool(agreement) and agreement.get("quote_as_scic_accuracy") is True
+    if not quote:
+        items.append(
+            "SCIC accuracy against isolated Nsight DRAM AI "
+            "(proxy and process-sum agreement rates are not this number)"
+        )
+    items.append("Plan-switch overhead on a serving trace")
+    items.append("End-to-end tokens/s on a model")
+    items.append("CUDA launch latency; 5 µs is only a sensitivity knob")
+    items.append("Attention epilogue kernels, MoE weight-dispatch policy, and measured FP8 or W8A8 peaks")
+    if fusion_meta is None:
+        items.append("Fusion proxy was not run. scripts/run_a40.sh passes --fusion-proxy.")
+    return items
 
 
 def _send_back(out: Path, summary: dict) -> str:
@@ -235,13 +301,26 @@ def _send_back(out: Path, summary: dict) -> str:
             f"  {out / 'rmsnorm_epilogue.csv'}",
             f"  {out / 'quant_epilogue.csv'}",
             f"  {out / 'ew_chains.csv'}",
+            f"  {out / 'decision_log.csv'}",
+            f"  {out / 'agreement.json'}",
+            f"  {out / 'fig_vendor_matmul_tflops.png'}",
             "  fig_*.png",
             "",
-            "Still TBD after a successful H100 matmul sweep:",
+            "When --fusion-proxy ran (scripts/run_a40.sh does):",
+            f"  {out / 'fusion_proxy.csv'}",
+            "",
+            "When TRY_NSIGHT=1 captured counters:",
+            f"  {out / 'nsight_dram.json'}",
+            "",
+            "Still TBD:",
             *[f"  - {item}" for item in summary["still_tbd"]],
             "",
-            "Do not relabel CPU or NumPy rows as H100 measurements.",
+            "Do not relabel CPU or NumPy rows as GPU measurements.",
             "Do not describe bench_gemm.csv as a fused-kernel comparison.",
+            "Do not describe fusion_proxy.csv as MemMode versus ComputeMode.",
+            "Do not quote agreement.json as SCIC accuracy unless quote_as_scic_accuracy is true.",
+            "Regime columns use a datasheet ridge unless measured_ridge_flops_per_byte is filled.",
+            "The uploaded A40 sweep used --machine H100_SXM_FP16, so its regime column is the H100 datasheet.",
             "Stage-Stream is not produced by this run.",
             "",
         ]

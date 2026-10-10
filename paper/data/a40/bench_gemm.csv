@@ -1,0 +1,8 @@
+label,M,N,K,backend,device_name,dtype_requested,analytical_ai_fp16,regime_vs_h100_datasheet,nsight_dram_bytes,achieved_ai,achieved_ai_status,kernel,fused_plan_timed,placeholder,dtype_ran,median_s,achieved_tflops
+decode_gemv,1,4096,4096,cuda-torch,NVIDIA A40,fp16,0.9995119571,memory-bound,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,8.905600011e-05,0.376779015
+micro_batch,4,4096,4096,cuda-torch,NVIDIA A40,fp16,3.992202729,memory-bound,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,8.02880004e-05,1.671703459
+decode_batch32,32,4096,4096,cuda-torch,NVIDIA A40,fp16,31.50769231,memory-bound,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,7.358400151e-05,14.59205536
+near_mstar,344,4096,4096,cuda-torch,NVIDIA A40,fp16,294.5284281,ridge-region,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,0.0001371679977,84.15027415
+ridge_m512,512,4096,4096,cuda-torch,NVIDIA A40,fp16,409.6,ridge-region,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,0.0001781760007,96.42078122
+prefill_m2048,2048,4096,4096,cuda-torch,NVIDIA A40,fp16,1024,compute-bound,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,0.0006583359838,104.3835951
+square_large,4096,4096,4096,cuda-torch,NVIDIA A40,fp16,1365.333333,compute-bound,,,TBD_NSIGHT,pytorch_matmul,false,false,fp16,0.001190912008,115.4064721

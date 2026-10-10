@@ -6,11 +6,12 @@ import argparse
 import sys
 
 from shapefuse import __version__
-from shapefuse.machines import MACHINES
+from shapefuse.machines import ALIASES, MACHINES
 
 
 def build_parser() -> argparse.ArgumentParser:
     machines = ", ".join(sorted(MACHINES))
+    aliases = ", ".join(f"{alias}->{ALIASES[alias]}" for alias in sorted(ALIASES))
     parser = argparse.ArgumentParser(
         prog="shapefuse",
         description=(
@@ -27,13 +28,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="all = tables + plans + figures + a matmul timing (default)",
     )
     parser.add_argument("--out", default="results", help="Output directory")
-    parser.add_argument("--machine", default="H100_SXM_FP16", help=f"Ridge anchor. One of: {machines}")
+    parser.add_argument(
+        "--machine",
+        default="H100_SXM_FP16",
+        help=f"Datasheet ridge anchor. Canonical: {machines}. Aliases: {aliases}.",
+    )
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument(
         "--bench-level",
         default="smoke",
-        choices=("smoke", "default", "h100"),
-        help="h100 is a 4096-wide matmul sweep and is refused on CPU",
+        choices=("smoke", "default", "h100", "a40"),
+        help="h100 and a40 share the 4096-wide matmul list and are refused on CPU",
+    )
+    parser.add_argument(
+        "--profile",
+        default="off",
+        choices=("off", "torch"),
+        help=(
+            "torch records allocator memory via torch.profiler and stores it as "
+            "proxy_ai. That is not DRAM and not achieved_ai."
+        ),
+    )
+    parser.add_argument(
+        "--nsight-json",
+        default=None,
+        help="JSON from scripts/nsight_dram.sh. Fills achieved_ai. Does not run ncu itself.",
+    )
+    parser.add_argument(
+        "--fusion-proxy",
+        action="store_true",
+        help=(
+            "Time matmul+RMSNorm and bias+GELU proxies. Not MemMode or ComputeMode. "
+            "See fusion_proxy.csv honesty column."
+        ),
     )
     parser.add_argument(
         "--require-cuda",

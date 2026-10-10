@@ -11,7 +11,7 @@ from shapefuse.intensity import (
     moe_grouped,
     softmax_scores,
 )
-from shapefuse.machines import A100_SXM80_FP16, H100_SXM_FP16, H100_SXM_FP8
+from shapefuse.machines import A100_SXM80_FP16, A40_FP16, H100_SXM_FP16, H100_SXM_FP8, get_machine
 from shapefuse.plans import select_plan
 from shapefuse.scic import Site, classify_site
 
@@ -19,10 +19,17 @@ from shapefuse.scic import Site, classify_site
 def assert_invariants() -> None:
     r_h = H100_SXM_FP16.ridge
     r_a = A100_SXM80_FP16.ridge
+    r_a40 = A40_FP16.ridge
     _close(r_h, 989e12 / 3.35e12, 1e-12)
     _close(r_a, 312e12 / 2.039e12, 1e-12)
+    _close(r_a40, 149.7e12 / 696e9, 1e-12)
     _close(gemm_m_for_target_ai(4096, r_h, 2), 344.94907864709285, 1e-9)
     _close(gemm_m_for_target_ai(4096, r_a, 2), 165.37193778675896, 1e-9)
+    _close(gemm_m_for_target_ai(4096, r_a40, 2), 240.32584259093773, 1e-9)
+    if get_machine("a40").name != "A40_FP16":
+        raise AssertionError("alias a40 should resolve to the A40 FP16 datasheet")
+    if get_machine("h100").name != "H100_SXM_FP16" or get_machine("a100").name != "A100_SXM80_FP16":
+        raise AssertionError("h100 and a100 aliases should resolve to datasheet anchors")
     # FP8 doubles AI and doubles the ridge, so M* stays put.
     _close(
         gemm_m_for_target_ai(4096, H100_SXM_FP8.ridge, 1),

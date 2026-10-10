@@ -12,13 +12,14 @@ ComFuse jointly fuses MatMul and epilogue. The piece added here is the shape-con
 
 Datasheet ridges (not measured on your machine):
 
-| anchor | dense peak | HBM | ridge |
+| anchor | dense peak | memory | ridge |
 | --- | --- | --- | --- |
 | H100 SXM FP16 | 989 TFLOP/s | 3.35 TB/s | ≈ 295 FLOP/byte |
 | H100 SXM FP8 | 1979 TFLOP/s | 3.35 TB/s | ≈ 591 FLOP/byte |
 | A100 80GB SXM FP16 | 312 TFLOP/s | 2.039 TB/s | ≈ 153 FLOP/byte |
+| A40 FP16 | 149.7 TFLOP/s | GDDR6 696 GB/s | ≈ 215 FLOP/byte |
 
-Sparsity peaks are not used. For N = K = 4096, FP16, the H100 M where AI equals the ridge is **M\* ≈ 345**. AI < 0.5 R for M ≲ 159 (memory-bound) and AI > 2 R for M ≳ 830 (compute-bound).
+Sparsity peaks are not used. The A40 149.7 figure is dense FP16 with FP16 accumulate; the datasheet sparsity number 299.4 is not used. For N = K = 4096, FP16, the H100 M where AI equals the ridge is **M\* ≈ 345**. The same formula on the A40 datasheet gives **M\* ≈ 240**. AI < 0.5 R for M ≲ 159 on H100 (memory-bound) and AI > 2 R for M ≳ 830 (compute-bound). Short names: `--machine a40`, `--machine h100`, `--machine a100`, `--machine h100_fp8`.
 
 ## Layout
 
@@ -26,6 +27,8 @@ Sparsity peaks are not used. For N = K = 4096, FP16, the H100 M where AI equals 
 shapefuse/            package: intensity, SCIC, plans, sweeps, bench, CLI
 scripts/run_cpu.sh    analytical run, safe without a GPU
 scripts/run_h100.sh   same tables plus a CUDA matmul sweep; refuses to run with no GPU
+scripts/run_a40.sh    A40 datasheet anchor, matmul sweep, profiler proxy, fusion proxy
+scripts/nsight_dram.sh  optional ncu capture; not run unless TRY_NSIGHT=1
 paper/draft.md        English MLSys/ASPLOS-style draft, with TBD markers
 paper/zh_outline.md   Chinese outline
 notes/draft_report_zh.md
@@ -82,26 +85,55 @@ The script requires `nvidia-smi` and `torch.cuda.is_available()`. It then runs:
 python -m shapefuse all --out results --device cuda --require-cuda --bench-level h100
 ```
 
-What that sweep actually times is stock `torch.matmul` at M ∈ {1, 4, 32, 344, 512, 2048, 4096}, N = K = 4096, FP16. That supports the "small M loses throughput" curve. It does **not** compare MemMode against ComputeMode, because those kernels are not generated.
+What that sweep actually times is stock `torch.matmul` at M ∈ {1, 4, 32, 344, 512, 2048, 4096}, N = K = 4096, FP16. That supports the "small M loses throughput" curve. It does **not** compare MemMode against ComputeMode, because those kernels are not generated. Optional: `PROFILE=torch FUSION_PROXY=1 bash scripts/run_h100.sh`.
+
+## Run on A40
+
+```bash
+bash scripts/run_a40.sh
+# PyTorch already installed:
+SKIP_INSTALL=1 bash scripts/run_a40.sh
+# also try Nsight Compute (fails soft; the matmul sweep still runs):
+TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
+```
+
+Default output directory is `results/a40`. Default `--machine` is `A40_FP16`. The script requires `nvidia-smi` and CUDA PyTorch, prints the device name, and warns if that name does not contain `A40`.
+
+One archived A40 run is already in the paper (`paper/data/a40/`, status `PARTIAL_VENDOR_MATMUL`). That run used `--machine H100_SXM_FP16`, so its regime column is the H100 datasheet. It timed `torch.matmul` only. Re-run with `scripts/run_a40.sh` before treating regimes as A40-datasheet labels. The new script still does not emit MemMode or ComputeMode kernels.
+
+What the new script adds, and what it is not:
+
+| output | meaning |
+| --- | --- |
+| `bench_gemm.csv` | `torch.matmul` latency and TFLOP/s. `achieved_ai` stays empty without Nsight |
+| `proxy_ai` | FLOPs / `torch.profiler` allocator bytes, status `TORCH_PROFILER_MEMORY_NOT_DRAM` |
+| `fusion_proxy.csv` | matmul+RMSNorm two-region vs eager chain vs `torch.compile` if it runs; bias+GELU two ops vs one Python expression; Triton elementwise stub only if Triton imports. Read the `honesty` column. Not a fused GEMM |
+| `decision_log.csv`, `agreement.json` | analytical plan vs regime from whatever byte AI exists. Quote as SCIC accuracy only when `quote_as_scic_accuracy` is true (`NSIGHT_DRAM`) |
+| `nsight_dram.json` | only after `TRY_NSIGHT=1` succeeds. Status `NSIGHT_DRAM_PROCESS_SUM` (process-wide sum, copies included) |
+
+`scripts/nsight_dram.sh` wraps `ncu`. Metric names vary; the default is `dram__bytes_read.sum,dram__bytes_write.sum`. Override with `NCU_METRICS`. List them with `ncu --query-metrics | grep dram__bytes`.
 
 ## What to send back for the paper
 
-After the H100 script, send the whole `results/` directory. `results/SEND_BACK.txt` repeats the list. Minimum:
+After `scripts/run_a40.sh` (or the H100 script), send the whole output directory. `SEND_BACK.txt` in that directory repeats the list. Minimum:
 
 - `summary.json`, `gpu_measurements.json`, `bench_gemm.csv`
+- `decision_log.csv`, `agreement.json`, `fusion_proxy.csv`
 - `gemm_shapes.csv`, `attention_intensity.csv`, `attention_decode.csv`
 - `rmsnorm_epilogue.csv`, `ew_chains.csv`, `moe_grouped.csv`, `quant_epilogue.csv`, `dual_plans.csv`
-- `fig_*.png`
+- `fig_*.png` (including `fig_vendor_matmul_tflops.png`)
+- `nsight_dram.json` if `TRY_NSIGHT=1` succeeded
 - the `nvidia-smi` header (driver, GPU name) and `torch.__version__` (already copied into `gpu_measurements.json` when CUDA runs)
 
-Leave the following as TBD unless you measure them. Do not invent numbers.
+Leave the following as TBD unless the file actually contains them. Do not invent numbers. Do not quote `proxy_ai` or a process-sum agreement rate as SCIC accuracy.
 
 | quantity | where it goes |
 | --- | --- |
-| DRAM bytes and achieved AI | `nsight_dram_bytes`, `achieved_ai` in `bench_gemm.csv` / `gpu_measurements.json` |
-| measured HBM bandwidth and ridge | `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte` |
-| MemMode vs ComputeMode kernel time | not produced; needs a real kernel study |
-| SCIC accuracy vs measured AI | paper evaluation, TBD |
+| DRAM bytes and achieved AI | `nsight_dram_bytes`, `achieved_ai` after Nsight JSON is ingested. Status must be `NSIGHT_DRAM` or `NSIGHT_DRAM_PROCESS_SUM` |
+| profiler memory (not DRAM) | `torch_profiler_memory_bytes`, `proxy_ai`, status `TORCH_PROFILER_MEMORY_NOT_DRAM` |
+| measured bandwidth and ridge | `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte` |
+| MemMode vs ComputeMode kernel time | not produced. `fusion_proxy.csv` is a proxy with an `honesty` column |
+| SCIC accuracy vs isolated Nsight AI | `agreement.json` only if `quote_as_scic_accuracy` is true |
 | plan-switch overhead, tokens/s | paper evaluation, TBD |
 | real CUDA launch latency | replace the 5 µs assumption |
 
@@ -155,7 +187,7 @@ print(report.regime, decision.primary.mode, decision.emit_both, decision.kernel_
 
 相对 ComFuse：对方做的是 MatMul 与 epilogue 的联合融合。这里增加的是按 shape 的强度分类，以及 MemMode / ComputeMode 切换。**Stage-Stream 不是我们的贡献，代码里也没有实现。** 不会生成融合 CUDA kernel。`dual_plans.csv` 里 `kernel_emitted=false`。
 
-上表的 H100 / A100 ridge 是数据手册锚点，不是你这台机器的实测峰值。N = K = 4096、FP16、H100 上 AI 等于 ridge 的点是 **M\* ≈ 345**。M ≲ 159 为 memory-bound（AI < 0.5 R），M ≳ 830 为 compute-bound（AI > 2 R）。
+上表的 H100 / A100 / A40 ridge 是数据手册锚点，不是你这台机器的实测峰值。A40 的 149.7 是密集 FP16（FP16 累加），不用稀疏 299.4。N = K = 4096、FP16、H100 上 AI 等于 ridge 的点是 **M\* ≈ 345**；A40 数据手册上 **M\* ≈ 240**。H100 上 M ≲ 159 为 memory-bound（AI < 0.5 R），M ≳ 830 为 compute-bound（AI > 2 R）。短名字：`--machine a40`、`h100`、`a100`、`h100_fp8`。
 
 ## 安装
 
@@ -187,24 +219,47 @@ SKIP_INSTALL=1 bash scripts/run_h100.sh
 
 脚本检查 `nvidia-smi` 和 `torch.cuda.is_available()`，然后跑 `--bench-level h100`。这次计时的是 `torch.matmul`（M 取 1、4、32、344、512、2048、4096，N = K = 4096，FP16），用来看小 M 吞吐是否塌掉。它**不是** MemMode 对 ComputeMode 的对比，因为这两套 kernel 没有生成。
 
+## 在 A40 上
+
+```bash
+bash scripts/run_a40.sh
+SKIP_INSTALL=1 bash scripts/run_a40.sh
+TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
+```
+
+默认输出 `results/a40`，数据手册锚点 `A40_FP16`。脚本检查 `nvidia-smi` 和 CUDA，设备名不含 A40 时只警告、不把结果改写成别的 GPU。
+
+论文里已经有一份 A40 归档（`paper/data/a40/`，`PARTIAL_VENDOR_MATMUL`）。那次用的是 `--machine H100_SXM_FP16`，regime 列是 H100 数据手册，计时的是 `torch.matmul`。下一轮请跑 `scripts/run_a40.sh`。新脚本仍然不生成 MemMode / ComputeMode kernel。
+
+| 产物 | 含义 |
+| --- | --- |
+| `bench_gemm.csv` | `torch.matmul` 时延和 TFLOP/s。没有 Nsight 时 `achieved_ai` 为空 |
+| `proxy_ai` | FLOPs / torch.profiler 分配器字节，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM` |
+| `fusion_proxy.csv` | matmul+RMSNorm 与 bias+GELU 的代理。看 `honesty` 列。不是融合 GEMM |
+| `decision_log.csv`、`agreement.json` | 解析计划对字节 AI。只有 `quote_as_scic_accuracy=true`（`NSIGHT_DRAM`）才能当准确率 |
+| `nsight_dram.json` | 仅 `TRY_NSIGHT=1` 成功时。状态 `NSIGHT_DRAM_PROCESS_SUM` |
+
 ## 论文需要你寄回的东西
 
-跑完后把整个 `results/` 目录寄回。`results/SEND_BACK.txt` 有清单。至少包括：
+跑完 `scripts/run_a40.sh`（或 H100 脚本）后，把整个输出目录寄回。该目录里的 `SEND_BACK.txt` 有清单。至少包括：
 
 - `summary.json`、`gpu_measurements.json`、`bench_gemm.csv`
+- `decision_log.csv`、`agreement.json`、`fusion_proxy.csv`
 - `gemm_shapes.csv`、`attention_intensity.csv`、`attention_decode.csv`
 - `rmsnorm_epilogue.csv`、`ew_chains.csv`、`moe_grouped.csv`、`quant_epilogue.csv`、`dual_plans.csv`
-- `fig_*.png`
+- `fig_*.png`（含 `fig_vendor_matmul_tflops.png`）
+- 若 `TRY_NSIGHT=1` 成功：`nsight_dram.json`
 - `nvidia-smi` 抬头（驱动、GPU 名）和 PyTorch 版本（CUDA 跑通时会写进 `gpu_measurements.json`）
 
-下面这些没有实测就保持 TBD，不要填估计数充数：
+下面这些没有写进文件就保持 TBD。不要把 `proxy_ai` 或进程合计的一致率当成 SCIC 准确率。
 
 | 量 | 填到哪里 |
 | --- | --- |
-| DRAM 字节和 achieved AI | `bench_gemm.csv` / `gpu_measurements.json` 的 `nsight_dram_bytes`、`achieved_ai` |
-| 实测 HBM 带宽和 ridge | `measured_hbm_bandwidth_bytes_per_s`、`measured_ridge_flops_per_byte` |
-| MemMode 与 ComputeMode 的 kernel 时延 | 本仓库不产生，需要单独的 kernel 实验 |
-| SCIC 相对实测 AI 的分类准确率 | 论文实验，TBD |
+| DRAM 字节和 achieved AI | 摄入 Nsight JSON 之后的 `nsight_dram_bytes`、`achieved_ai`。状态应为 `NSIGHT_DRAM` 或 `NSIGHT_DRAM_PROCESS_SUM` |
+| profiler 显存（不是 DRAM） | `torch_profiler_memory_bytes`、`proxy_ai`，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM` |
+| 实测带宽和 ridge | `measured_hbm_bandwidth_bytes_per_s`、`measured_ridge_flops_per_byte` |
+| MemMode 与 ComputeMode 的 kernel 时延 | 本仓库不产生。`fusion_proxy.csv` 是带 `honesty` 列的代理 |
+| SCIC 相对孤立 Nsight AI 的准确率 | 仅当 `agreement.json` 里 `quote_as_scic_accuracy` 为 true |
 | 计划切换开销、tokens/s | 论文实验，TBD |
 | 真实 CUDA launch 时延 | 替换 5 µs 的假设 |
 

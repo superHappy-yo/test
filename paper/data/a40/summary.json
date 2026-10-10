@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "package_version": "0.1.0",
+  "thesis": "Operator intensity is shape-dependent; fusion must be plan-polymorphic across the Roofline ridge.",
+  "non_contributions": [
+    "Stage-Stream",
+    "a new attention algorithm",
+    "emitted CUDA kernels for MemMode or ComputeMode"
+  ],
+  "gpu_measurement_status": "PARTIAL_VENDOR_MATMUL",
+  "machine": "H100_SXM_FP16",
+  "ridge_flops_per_byte": 295.2238805970149,
+  "peak_source": "NVIDIA H100 SXM datasheet, dense FP16 Tensor Core, HBM3 3.35 TB/s",
+  "thresholds": {
+    "mem_frac": 0.5,
+    "compute_frac": 2.0
+  },
+  "launch_overhead_us": 5.0,
+  "launch_status": "ASSUMED_NOT_MEASURED",
+  "crossings": {
+    "H100_SXM_FP16": {
+      "N": 4096.0,
+      "K": 4096.0,
+      "elem_bytes": 2.0,
+      "ridge": 295.2238805970149,
+      "M_memory_edge_0.5R": 159.07764321505425,
+      "M_star_AI_equals_ridge": 344.94907864709285,
+      "M_compute_edge_2R": 829.6354550667648,
+      "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+      "peak_source": "datasheet"
+    },
+    "A100_SXM80_FP16": {
+      "N": 4096.0,
+      "K": 4096.0,
+      "elem_bytes": 2.0,
+      "ridge": 153.01618440411966,
+      "M_memory_edge_0.5R": 79.47715748163125,
+      "M_star_AI_equals_ridge": 165.37193778675896,
+      "M_compute_edge_2R": 359.79674943241196,
+      "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+      "peak_source": "datasheet"
+    },
+    "H100_SXM_FP8": {
+      "N": 4096.0,
+      "K": 4096.0,
+      "elem_bytes": 1.0,
+      "ridge": 590.7462686567164,
+      "M_memory_edge_0.5R": 159.16431696263774,
+      "M_star_AI_equals_ridge": 345.15286222812665,
+      "M_compute_edge_2R": 830.2249170387972,
+      "formula": "M = t * elem * d / (2 * (d - t * elem)), N=K=d",
+      "peak_source": "datasheet"
+    }
+  },
+  "gemm_highlights": [
+    {
+      "label": "square_large",
+      "shape": [
+        4096,
+        4096,
+        4096
+      ],
+      "AI_fp16": 1365.33,
+      "regime": "compute-bound",
+      "vs_H100": "compute-bound"
+    },
+    {
+      "label": "square_med",
+      "shape": [
+        1024,
+        1024,
+        1024
+      ],
+      "AI_fp16": 341.33,
+      "regime": "ridge-region",
+      "vs_H100": "ridge-region"
+    },
+    {
+      "label": "square_small",
+      "shape": [
+        256,
+        256,
+        256
+      ],
+      "AI_fp16": 85.33,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "decode_gemv",
+      "shape": [
+        1,
+        4096,
+        4096
+      ],
+      "AI_fp16": 1.0,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "decode_batch8",
+      "shape": [
+        8,
+        4096,
+        4096
+      ],
+      "AI_fp16": 7.97,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "decode_batch32",
+      "shape": [
+        32,
+        4096,
+        4096
+      ],
+      "AI_fp16": 31.51,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "prefill_long",
+      "shape": [
+        2048,
+        4096,
+        4096
+      ],
+      "AI_fp16": 1024.0,
+      "regime": "compute-bound",
+      "vs_H100": "compute-bound"
+    },
+    {
+      "label": "tall_skinny_K",
+      "shape": [
+        4096,
+        4096,
+        64
+      ],
+      "AI_fp16": 62.06,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "wide_N",
+      "shape": [
+        128,
+        12288,
+        4096
+      ],
+      "AI_fp16": 122.88,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "ffn_down",
+      "shape": [
+        128,
+        4096,
+        12288
+      ],
+      "AI_fp16": 122.88,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "micro_batch",
+      "shape": [
+        4,
+        4096,
+        4096
+      ],
+      "AI_fp16": 3.99,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "moe_expert_small",
+      "shape": [
+        16,
+        4096,
+        14336
+      ],
+      "AI_fp16": 15.92,
+      "regime": "memory-bound",
+      "vs_H100": "memory-bound"
+    },
+    {
+      "label": "moe_expert_med",
+      "shape": [
+        256,
+        4096,
+        14336
+      ],
+      "AI_fp16": 236.96,
+      "regime": "ridge-region",
+      "vs_H100": "ridge-region"
+    },
+    {
+      "label": "moe_expert_large",
+      "shape": [
+        2048,
+        4096,
+        14336
+      ],
+      "AI_fp16": 1246.61,
+      "regime": "compute-bound",
+      "vs_H100": "compute-bound"
+    },
+    {
+      "label": "near_mstar_h100",
+      "shape": [
+        345,
+        4096,
+        4096
+      ],
+      "AI_fp16": 295.26,
+      "regime": "ridge-region",
+      "vs_H100": "ridge-region"
+    }
+  ],
+  "moe_highlights": [
+    {
+      "scenario": "balanced_8e",
+      "AI_aggregate_fp16": 236.95867768595042,
+      "AI_min_expert": 236.95867768595042,
+      "AI_max_expert": 236.95867768595042,
+      "regime_aggregate": "ridge-region",
+      "regime_min_expert": "ridge-region",
+      "regime_max_expert": "ridge-region",
+      "heterogeneous": false
+    },
+    {
+      "scenario": "skewed_8e",
+      "AI_aggregate_fp16": 236.10165660218942,
+      "AI_min_expert": 7.979961035346507,
+      "AI_max_expert": 774.918918918919,
+      "regime_aggregate": "ridge-region",
+      "regime_min_expert": "memory-bound",
+      "regime_max_expert": "compute-bound",
+      "heterogeneous": true
+    },
+    {
+      "scenario": "decode_tiny",
+      "AI_aggregate_fp16": 1.9987452073893344,
+      "AI_min_expert": 1.9987452073893344,
+      "AI_max_expert": 1.9987452073893344,
+      "regime_aggregate": "memory-bound",
+      "regime_min_expert": "memory-bound",
+      "regime_max_expert": "memory-bound",
+      "heterogeneous": false
+    },
+    {
+      "scenario": "prefill_fat",
+      "AI_aggregate_fp16": 1246.608695652174,
+      "AI_min_expert": 1246.608695652174,
+      "AI_max_expert": 1246.608695652174,
+      "regime_aggregate": "compute-bound",
+      "regime_min_expert": "compute-bound",
+      "regime_max_expert": "compute-bound",
+      "heterogeneous": false
+    },
+    {
+      "scenario": "one_hot_expert",
+      "AI_aggregate_fp16": 1246.608695652174,
+      "AI_min_expert": 1246.608695652174,
+      "AI_max_expert": 1246.608695652174,
+      "regime_aggregate": "compute-bound",
+      "regime_min_expert": "compute-bound",
+      "regime_max_expert": "compute-bound",
+      "heterogeneous": false
+    },
+    {
+      "scenario": "one_hot_load_all_weights",
+      "AI_aggregate_fp16": 236.95867768595042,
+      "AI_min_expert": 1246.608695652174,
+      "AI_max_expert": 1246.608695652174,
+      "regime_aggregate": "ridge-region",
+      "regime_min_expert": "compute-bound",
+      "regime_max_expert": "compute-bound",
+      "heterogeneous": false
+    }
+  ],
+  "plan_counts": {
+    "primary": {
+      "ComputeMode": 12,
+      "MemMode": 35
+    },
+    "emit_both": 8,
+    "rows": 47,
+    "kernels_emitted": 0
+  },
+  "bench": {
+    "backend": "cuda-torch",
+    "device_name": "NVIDIA A40",
+    "torch_version": "2.5.1+cu121",
+    "cuda_version": "12.1",
+    "placeholder": false,
+    "note": "Latency of torch.matmul only. Not a fused-kernel comparison. nsight_dram_bytes and achieved_ai are TBD.",
+    "warning": null,
+    "bench_level": "h100",
+    "what_was_timed": "torch.matmul or numpy matmul; not MemMode/ComputeMode kernels",
+    "nsight_dram_bytes": null,
+    "nsight_status": "TBD_RUN_PROFILER",
+    "measured_hbm_bandwidth_bytes_per_s": null,
+    "measured_ridge_flops_per_byte": null,
+    "achieved_tflops_max": 115.4064721119588,
+    "datasheet_h100_fp16_tflops": 989.0,
+    "fraction_of_h100_fp16_datasheet_peak": 0.11669006280278948
+  },
+  "bench_rows": 7,
+  "cpu_proxy_rows": 0,
+  "still_tbd": [
+    "Nsight DRAM bytes and achieved AI for each bench shape",
+    "Measured HBM bandwidth and a measured ridge (datasheet ridge is not a substitute)",
+    "MemMode vs ComputeMode kernel latencies (this repo does not emit those kernels)",
+    "SCIC agreement rate against measured AI",
+    "Plan-switch overhead on a serving trace",
+    "End-to-end tokens/s on a model",
+    "CUDA launch latency; 5 \u00b5s is only a sensitivity knob"
+  ],
+  "repro": {
+    "python": "3.10.12",
+    "platform": "Linux-3.10.0-1160.119.1.el7.x86_64-x86_64-with-glibc2.35",
+    "command": "/root/test/shapefuse/__main__.py all --out /root/test/results/a40 --device cuda --require-cuda --bench-level h100 --machine H100_SXM_FP16",
+    "requested_device": "cuda",
+    "bench_level": "h100"
+  }
+}

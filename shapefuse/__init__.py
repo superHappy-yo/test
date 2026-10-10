@@ -23,6 +23,7 @@ from shapefuse.intensity import (
 )
 from shapefuse.machines import (
     A100_SXM80_FP16,
+    A40_FP16,
     H100_SXM_FP8,
     H100_SXM_FP16,
     MACHINES,
@@ -34,6 +35,7 @@ from shapefuse.scic import IntensityReport, classify_site
 
 __all__ = [
     "A100_SXM80_FP16",
+    "A40_FP16",
     "ELEM_BYTES",
     "H100_SXM_FP16",
     "H100_SXM_FP8",
@@ -57,4 +59,4 @@ __all__ = [
     "select_plan",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -52,12 +52,19 @@ class CliTests(unittest.TestCase):
                 "fig_epilogue_tradeoff.png",
                 "fig_plan_regions.png",
                 "fig_cpu_gflops_vs_M.png",
+                "fig_vendor_matmul_tflops.png",
+                "decision_log.csv",
+                "agreement.json",
                 "SEND_BACK.txt",
             ):
                 self.assertTrue((dest / name).is_file(), name)
             bench = (dest / "bench_gemm.csv").read_text(encoding="utf-8")
             self.assertIn("TBD_NSIGHT", bench)
             self.assertIn("false", bench)  # fused_plan_timed
+            agreement = json.loads((dest / "agreement.json").read_text(encoding="utf-8"))
+            self.assertEqual(agreement["scic_accuracy_status"], "TBD_NO_MEASURED_AI")
+            self.assertFalse(agreement["quote_as_scic_accuracy"])
+            self.assertIsNone(agreement["regime_agreement_rate_nsight_isolated"])
 
     def test_unknown_machine(self) -> None:
         import tempfile

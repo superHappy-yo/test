@@ -8,7 +8,7 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | --- | --- |
 | `PLACEHOLDER_NOT_RUN` | tables only; no timer |
 | `PLACEHOLDER_NO_GPU` | timer ran on CPU or NumPy; not an H100 result |
-| `PARTIAL_VENDOR_MATMUL` | CUDA `torch.matmul` latencies are real; fusion kernels were not timed |
+| `PARTIAL_VENDOR_MATMUL` | CUDA `torch.matmul` latencies are real; MemMode and ComputeMode kernels were not timed. A fusion proxy, if present, is a separate file and does not change this status |
 
 ## Files
 
@@ -25,18 +25,24 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | `quant_epilogue.csv` | mixed-dtype byte what-if |
 | `dual_plans.csv` | MemMode / ComputeMode decisions; `kernel_emitted` is false |
 | `crossings.json` | M at 0.5 R, R, and 2 R |
-| `bench_gemm.csv` | vendor matmul latency; `achieved_ai` empty |
-| `gpu_measurements.json` | device metadata and explicit nulls |
+| `bench_gemm.csv` | vendor matmul latency. `achieved_ai` is empty unless Nsight JSON was passed. `proxy_ai` is torch.profiler allocator memory when `--profile torch` |
+| `decision_log.csv` | analytical dual-plan decision for each bench shape, plus byte-derived regime when a byte AI exists |
+| `agreement.json` | agreement rates. `quote_as_scic_accuracy` is true only for status `NSIGHT_DRAM` |
+| `fusion_proxy.csv` | present when `--fusion-proxy` is set. Read `honesty`. Not MemMode or ComputeMode |
+| `gpu_measurements.json` | device metadata, agreement summary, fusion-proxy summary, explicit nulls |
 | `summary.json` | machine, crossings, highlights, TBD list |
-| `fig_*.png` | analytical figures |
+| `fig_*.png` | analytical figures, plus `fig_vendor_matmul_tflops.png` when a bench ran |
+| `nsight_dram.json` | optional, from `scripts/nsight_dram.sh`. Not written by the CLI itself |
 | `SEND_BACK.txt` | checklist of what to return |
 
 ## Fields that stay empty until a human measures them
 
-- `nsight_dram_bytes`, `achieved_ai`
+- `achieved_ai`, until a Nsight JSON is ingested (`--nsight-json` or `TRY_NSIGHT=1`)
+- `proxy_ai` is allowed to be filled by `--profile torch` and must stay labeled `TORCH_PROFILER_MEMORY_NOT_DRAM`
 - `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte`
 - `measured_winner` in `dual_plans.csv`
-- MemMode versus ComputeMode kernel time (no kernel is emitted)
+- MemMode versus ComputeMode kernel time (no such kernel is emitted; `fusion_proxy.csv` does not count)
 - end-to-end tokens/s
+- `quote_as_scic_accuracy` stays false for profiler memory and for `NSIGHT_DRAM_PROCESS_SUM`
 
-Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency.
+Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency. `--machine a40` selects the A40 datasheet preset (149.7 TFLOP/s, 696 GB/s). That preset is not a measured ridge. The archived A40 matmul sweep used `--machine H100_SXM_FP16`, so its regime column is the H100 datasheet.

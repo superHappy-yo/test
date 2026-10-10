@@ -1,0 +1,32 @@
+{
+  "status": "PARTIAL_VENDOR_MATMUL",
+  "do_not_treat_as_fused_kernel_study": true,
+  "bench": {
+    "backend": "cuda-torch",
+    "device_name": "NVIDIA A40",
+    "torch_version": "2.5.1+cu121",
+    "cuda_version": "12.1",
+    "placeholder": false,
+    "note": "Latency of torch.matmul only. Not a fused-kernel comparison. nsight_dram_bytes and achieved_ai are TBD.",
+    "warning": null,
+    "bench_level": "h100",
+    "what_was_timed": "torch.matmul or numpy matmul; not MemMode/ComputeMode kernels",
+    "nsight_dram_bytes": null,
+    "nsight_status": "TBD_RUN_PROFILER",
+    "measured_hbm_bandwidth_bytes_per_s": null,
+    "measured_ridge_flops_per_byte": null,
+    "achieved_tflops_max": 115.4064721119588,
+    "datasheet_h100_fp16_tflops": 989.0,
+    "fraction_of_h100_fp16_datasheet_peak": 0.11669006280278948
+  },
+  "rows_file": "bench_gemm.csv",
+  "still_tbd": [
+    "Nsight DRAM bytes and achieved AI for each bench shape",
+    "Measured HBM bandwidth and a measured ridge (datasheet ridge is not a substitute)",
+    "MemMode vs ComputeMode kernel latencies (this repo does not emit those kernels)",
+    "SCIC agreement rate against measured AI",
+    "Plan-switch overhead on a serving trace",
+    "End-to-end tokens/s on a model",
+    "CUDA launch latency; 5 \u00b5s is only a sensitivity knob"
+  ]
+}
