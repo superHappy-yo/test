@@ -128,7 +128,7 @@ FP8 doubles both the Tensor-Core peak and the AI of an all-FP8 GEMM (half the by
 | expert, 256 tokens | 256, 4096, 14336 | 237 | ridge-region |
 | expert, 2048 tokens | 2048, 4096, 14336 | 1247 | compute-bound |
 
-A linear layer is not "a compute kernel." Decode and prefill of that layer are different regimes on the same GPU.
+For a uniform dtype, AI is unchanged if N and K are swapped, so the expert rows match both \([t, H]\times[H, I]\) and the \((M, N, K)\) order stored in `gemm_shapes.csv`. A linear layer is not "a compute kernel." Decode and prefill of that layer are different regimes on the same GPU.
 
 ### 3.2 Attention
 
