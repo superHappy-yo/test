@@ -115,6 +115,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not try torch.compile mode=max-autotune. The row is marked skipped.",
     )
     parser.add_argument(
+        "--calibrate",
+        default="ridge-compute",
+        choices=("ridge-compute", "all-gemm", "off"),
+        help=(
+            "Few-shot wall-clock of always_fuse vs always_unfuse for GEMM. "
+            "ridge-compute (default) probes the ridge band and the compute side. "
+            "all-gemm also probes memory-bound MatMul+RMSNorm. "
+            "off keeps the datasheet baseline. Not DRAM AI. Attention is unchanged. "
+            "A busy GPU can flip the winner."
+        ),
+    )
+    parser.add_argument(
         "--repeats",
         type=int,
         default=None,

@@ -11,7 +11,7 @@ This directory is the upload from `scripts/run_baseline_bakeoff.sh` on the branc
 
 `scic_selected` copies `timing_copied_from`. It does not include plan-switch overhead.
 
-This run used the library-SDPA epilogue policy `compile_sdpa_chain`, timed as `always_fuse`. All five attention decisions copy `always_fuse`. GEMM is unchanged: ComputeMode and the compute side of the ridge still copy `always_unfuse`. On this CSV that GEMM choice leaves a faster `torch.compile` path on the table (`ridge_m256`, `ridge_m512`, `prefill_m2048`, `prefill_m4096`). The selector is not flipped here. A calibrated selector is the follow-up.
+This run used the library-SDPA epilogue policy `compile_sdpa_chain`, timed as `always_fuse`. All five attention decisions copy `always_fuse`. GEMM is unchanged: ComputeMode and the compute side of the ridge still copy `always_unfuse`. On this CSV that GEMM choice leaves a faster `torch.compile` path on the table (`ridge_m256`, `ridge_m512`, `prefill_m2048`, `prefill_m4096`). This directory predates the wall-clock GEMM probe. Do not relabel those `always_unfuse` cells. A later bakeoff fills `measured_winner` from a few-shot wall-clock on the machine that runs it. That probe is not DRAM AI and not SCIC accuracy. A busy GPU can flip it.
 
 `bakeoff_summary.json` still contains the generator note that asks for a re-bakeoff and names `paper/data/bakeoff` as the pre-fix selector. That sentence was emitted by the code that wrote the file. The CSVs in this directory are the post-fix wall-clock. `paper/data/bakeoff/` remains the pre-fix archive.
 

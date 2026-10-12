@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from shapefuse.intensity import (
     attn_fa_prefill,
     attn_qkt,
@@ -12,7 +14,15 @@ from shapefuse.intensity import (
     softmax_scores,
 )
 from shapefuse.machines import A100_SXM80_FP16, A40_FP16, H100_SXM_FP16, H100_SXM_FP8, get_machine
-from shapefuse.plan_paths import BASELINE_ALWAYS_FUSE, BASELINE_ALWAYS_UNFUSE, select_executable_path
+from shapefuse.plan_paths import (
+    BASELINE_ALWAYS_FUSE,
+    BASELINE_ALWAYS_UNFUSE,
+    analytical_executable_path,
+    attach_measured_winner,
+    gemm_calibration_applies,
+    pick_wallclock_winner,
+    select_executable_path,
+)
 from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, select_plan
 from shapefuse.scic import Site, classify_site
 
@@ -87,8 +97,37 @@ def assert_invariants() -> None:
         raise AssertionError("selector must not claim a kernel was emitted")
     if select_executable_path(select_plan(mem, length=1)) != BASELINE_ALWAYS_FUSE:
         raise AssertionError("memory-bound GEMM must select always_fuse")
-    if select_executable_path(select_plan(comp, length=2048)) != BASELINE_ALWAYS_UNFUSE:
-        raise AssertionError("compute-bound GEMM must select always_unfuse")
+    comp_plan = select_plan(comp, length=2048)
+    if select_executable_path(comp_plan) != BASELINE_ALWAYS_UNFUSE:
+        raise AssertionError("compute-bound GEMM must select always_unfuse without a probe")
+    if analytical_executable_path(comp_plan) != BASELINE_ALWAYS_UNFUSE:
+        raise AssertionError("analytical compute GEMM stays always_unfuse")
+    if not gemm_calibration_applies(comp_plan, "ridge-compute"):
+        raise AssertionError("compute GEMM is in the ridge-compute calibration scope")
+    if gemm_calibration_applies(select_plan(mem, length=1), "ridge-compute"):
+        raise AssertionError("memory-bound GEMM stays analytical unless scope is all-gemm")
+    if not gemm_calibration_applies(select_plan(mem, length=1), "all-gemm"):
+        raise AssertionError("all-gemm probes every GEMM shape")
+    if gemm_calibration_applies(d_long, "all-gemm"):
+        raise AssertionError("attention is not wall-clock calibrated")
+    overridden = attach_measured_winner(comp_plan, BASELINE_ALWAYS_FUSE)
+    if overridden.measured_winner != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("probe must fill measured_winner")
+    if select_executable_path(overridden) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("measured always_fuse must override analytical always_unfuse")
+    if analytical_executable_path(overridden) != BASELINE_ALWAYS_UNFUSE:
+        raise AssertionError("analytical baseline ignores measured_winner")
+    if pick_wallclock_winner(0.7, 0.9) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("faster fuse median must win")
+    if pick_wallclock_winner(0.9, 0.7) != BASELINE_ALWAYS_UNFUSE:
+        raise AssertionError("faster unfuse median must win")
+    if pick_wallclock_winner(1.0, 1.0) is not None or pick_wallclock_winner(None, 1.0) is not None:
+        raise AssertionError("a tie or a missing median keeps the analytical baseline")
+    if select_executable_path(attach_measured_winner(d_long, BASELINE_ALWAYS_UNFUSE)) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("attention ignores a measured unfuse winner")
+    stuffed = replace(d_long, measured_winner=BASELINE_ALWAYS_UNFUSE)
+    if select_executable_path(stuffed) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("library SDPA stays always_fuse even if measured_winner says unfuse")
     if select_executable_path(d_short) != BASELINE_ALWAYS_FUSE:
         raise AssertionError("short attention must select always_fuse (epilogue on SDPA)")
     if d_long.epilogue_policy != POLICY_COMPILE_SDPA_CHAIN:

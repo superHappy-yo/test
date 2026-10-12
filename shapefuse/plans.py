@@ -8,7 +8,9 @@ the intensity model, and it is not an implementation of Stage-Stream or of
 FlashAttention.
 
 No CUDA is emitted. ``kernel_emitted`` is always false. A :class:`PlanCache`
-can record a measured winner later; this repo leaves it empty.
+can record a measured winner. Analytical sweeps leave it empty. The bakeoff
+records a wall-clock GEMM path when the few-shot probe returns one. That
+record is not DRAM arithmetic intensity.
 """
 
 from __future__ import annotations
@@ -75,13 +77,18 @@ class PlanCache:
         return self.entries.get(key)
 
     def record_measured_winner(self, key: str, mode: str, metric: str, value: float) -> None:
-        if mode not in {"MemMode", "ComputeMode"}:
-            raise ValueError(f"mode must be MemMode or ComputeMode, got {mode!r}")
+        # MemMode / ComputeMode are the analytical plan names. always_fuse /
+        # always_unfuse are bakeoff paths. The wall-clock probe records the
+        # path. It does not claim a custom kernel won.
+        allowed = {"MemMode", "ComputeMode", "always_fuse", "always_unfuse"}
+        if mode not in allowed:
+            raise ValueError(f"mode must be one of {sorted(allowed)}, got {mode!r}")
+        source = "measured_wallclock" if mode in {"always_fuse", "always_unfuse"} else "measured"
         self.entries[key] = {
             "mode": mode,
             "metric": metric,
             "value": value,
-            "source": "measured",
+            "source": source,
         }
 
 
@@ -155,8 +162,9 @@ def select_plan(report: IntensityReport, *, length: int | None = None) -> PlanDe
         # wall-clock (paper/data/bakeoff) lost at prefill S=512 and S=2048.
         # Score compile_sdpa_chain, timed as always_fuse, in every attention
         # regime, including ridge and compute. paper/data/bakeoff_v2 is that
-        # wall-clock. The GPU was not idle. GEMM ComputeMode still selects
-        # always_unfuse; a calibrated GEMM selector is TODO and is not applied.
+        # wall-clock. The GPU was not idle. GEMM's analytical ComputeMode
+        # still leaves fuse_epilogue false. The bakeoff may set
+        # measured_winner from a wall-clock probe; select_plan does not time it.
         epilogue_policy = POLICY_COMPILE_SDPA_CHAIN
         why += (
             " Scores stay off HBM in both plans. Tile size and extra epilogue "
@@ -167,7 +175,10 @@ def select_plan(report: IntensityReport, *, length: int | None = None) -> PlanDe
             "including when the analytical primary is ComputeMode. "
             "always_unfuse only splits RMSNorm off that library kernel. "
             "paper/data/bakeoff_v2 records the wall-clock for this policy. "
-            "That GPU was not idle."
+            "That GPU was not idle. "
+            "GEMM's analytical ComputeMode still leaves fuse_epilogue false. "
+            "A wall-clock probe may override the GEMM executable path later. "
+            "select_plan does not time that probe, and the probe is not DRAM AI."
         )
     elif kind == "moe_grouped":
         why += " Grouped-GEMM aggregate only; split experts with moe_expert rows."

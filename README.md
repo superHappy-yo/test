@@ -40,7 +40,15 @@ scripts/run_baseline_bakeoff.sh   Docker wall-clock bakeoff, no Nsight
 
 ## Docker bakeoff (one command, no Nsight)
 
-This is the run to send back. It times MatMul+RMSNorm and an attention microbench on CUDA. GEMM follows the datasheet regime: MemMode selects `always_fuse`, ComputeMode selects `always_unfuse`. Library attention scores `compile_sdpa_chain`, timed as `always_fuse`, in every regime, because SDPA already fuses scores. `paper/data/bakeoff/` is the pre-fix selector. `paper/data/bakeoff_v2/` is the wall-clock after that attention change. It is not an idle GPU, and it does not change the GEMM rule. On that CSV, ridge and compute GEMM still copy `always_unfuse` while `torch.compile` is faster. A calibrated selector is TODO. The script does not run Nsight, does not claim FlashAttention-3, and does not quote a profiler as SCIC accuracy.
+This is the run to send back. It times MatMul+RMSNorm and an attention microbench on CUDA. The analytical GEMM rule is unchanged: MemMode selects `always_fuse`, ComputeMode selects `always_unfuse`. Library attention scores `compile_sdpa_chain`, timed as `always_fuse`, in every regime, because SDPA already fuses scores. That attention path is not wall-clock calibrated. `paper/data/bakeoff/` is the pre-fix selector. `paper/data/bakeoff_v2/` is the wall-clock after that attention change. On that CSV, ridge and compute GEMM still copy `always_unfuse` while `torch.compile` is 1.23–1.33× faster. The bakeoff now closes that miss with a few-shot wall-clock probe: `selected_baseline` follows `measured_winner` when the probe returns one, and otherwise keeps the analytical baseline. `bakeoff_decisions.csv` logs `analytical_baseline`, `measured_winner`, and `selection_source`.
+
+**Re-run after pull.** `paper/data/bakeoff_v2/` was collected before the probe. Do not relabel its compute-side `always_unfuse` cells.
+
+```bash
+bash scripts/run_baseline_bakeoff.sh
+```
+
+The probe is wall-clock on this machine (1 warmup and 3 iterations by default; `CALIBRATION_WARMUP` and `CALIBRATION_REPEATS`). It is not DRAM arithmetic intensity, and it is not SCIC accuracy. A busy GPU can flip `measured_winner`. The second A40 run was a busy GPU: physical GPU 1 at 92% utilization. Default scope is ridge and compute GEMM. `CALIBRATE=all-gemm` also probes memory-bound MatMul+RMSNorm. `CALIBRATE=off` keeps the datasheet baseline. The script does not run Nsight, does not claim FlashAttention-3, and does not quote a profiler as SCIC accuracy.
 
 **Idle GPU recommended.** The pre-fix A40 run was not idle: `paper/data/bakeoff/RUN_NOTES.txt` records GPU 0 at 83% utilization and GPU 1 at 77% when the script started. The second run was not idle either: `paper/data/bakeoff_v2/RUN_NOTES.txt` records the selected GPU at 92% utilization with 13490 MiB already allocated. A busy device changes the medians.
 
@@ -217,7 +225,7 @@ print(report.regime, decision.primary.mode, decision.emit_both, decision.kernel_
 
 ## Paper
 
-- English draft: [`paper/draft.md`](paper/draft.md). §7.3 quotes `paper/data/bakeoff/` (pre-fix attention selector) and `paper/data/bakeoff_v2/` (after `compile_sdpa_chain`, busy GPU). GEMM calibration is still **TODO**. Every other missing GPU number is marked **TBD**.
+- English draft: [`paper/draft.md`](paper/draft.md). §7.3 quotes `paper/data/bakeoff/` (pre-fix attention selector) and `paper/data/bakeoff_v2/` (after `compile_sdpa_chain`, busy GPU). That second CSV predates the GEMM wall-clock probe. The probe is not DRAM AI and not SCIC accuracy. Every other missing GPU number is marked **TBD**.
 - Chinese outline: [`paper/zh_outline.md`](paper/zh_outline.md).
 
 ---
@@ -236,7 +244,13 @@ print(report.regime, decision.primary.mode, decision.emit_both, decision.kernel_
 
 ## Docker bakeoff（一条命令，无 Nsight）
 
-请跑这一条，并把目录寄回。它在 CUDA 上计 MatMul+RMSNorm，以及可选的 Attention 微基准。GEMM 按数据手册分档：MemMode 选 `always_fuse`，ComputeMode 选 `always_unfuse`。库 Attention 的 epilogue 在所有档位都记 `compile_sdpa_chain`（计时为 `always_fuse`），因为 SDPA 已经融合了 score。`paper/data/bakeoff/` 是改这条规则之前的归档。`paper/data/bakeoff_v2/` 是改完之后的墙钟，不是空闲 GPU，也没有改 GEMM 规则。那份 CSV 里 ridge 和计算侧 GEMM 仍抄 `always_unfuse`，而 `torch.compile` 更快。校准选择器是 TODO。不跑 Nsight，不宣称 FA-3，不把 profiler 写成准确率。
+拉下来之后请重跑，并把目录寄回：
+
+```bash
+bash scripts/run_baseline_bakeoff.sh
+```
+
+它在 CUDA 上计 MatMul+RMSNorm，以及可选的 Attention 微基准。解析 GEMM 规则不变：MemMode 选 `always_fuse`，ComputeMode 选 `always_unfuse`。库 Attention 的 epilogue 在所有档位都记 `compile_sdpa_chain`（计时为 `always_fuse`），不参加墙钟校准。`paper/data/bakeoff/` 是改 Attention 规则之前的归档。`paper/data/bakeoff_v2/` 是改完之后的墙钟，不是空闲 GPU。那份 CSV 里 ridge 和计算侧 GEMM 仍抄 `always_unfuse`，而 `torch.compile` 大约快 1.23× 到 1.33×。现在的 bakeoff 用短墙钟填 `measured_winner`，有赢家时 `selected_baseline` 跟着它。探针是本机墙钟，不是 DRAM AI，也不是 SCIC 准确率。忙 GPU 可能把赢家翻掉。不跑 Nsight，不宣称 FA-3，不把 profiler 写成准确率。
 
 **建议空闲 GPU。** 修复前的 A40 运行不是空闲的：`paper/data/bakeoff/RUN_NOTES.txt` 记录脚本启动时 GPU 0 利用率 83%，GPU 1 为 77%。第二次也不是：`paper/data/bakeoff_v2/RUN_NOTES.txt` 记录所选 GPU 利用率 92%，已分配 13490 MiB。忙设备会改变 median。
 

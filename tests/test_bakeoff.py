@@ -12,9 +12,13 @@ from shapefuse.bakeoff import (
     GEMM_LEVELS,
     Measurement,
     assemble_latency_rows,
+    calibration_from_medians,
     configure_dynamo_cache_limit,
+    decision_row,
     decide_attention,
     decide_gemm,
+    scic_selection_honesty,
+    skipped_calibration,
 )
 from shapefuse.cli import main
 from shapefuse.intensity import Thresholds
@@ -24,6 +28,17 @@ from shapefuse.plan_paths import (
     BASELINE_ALWAYS_UNFUSE,
     BASELINE_EAGER,
     BASELINE_SCIC,
+    HONESTY_ANALYTICAL_FALLBACK,
+    HONESTY_GPU_CONTENTION,
+    HONESTY_MEASURED_OVERRIDE,
+    HONESTY_WALLCLOCK_NOT_DRAM,
+    SELECTION_ANALYTICAL,
+    SELECTION_ANALYTICAL_FALLBACK,
+    SELECTION_MEASURED,
+    analytical_executable_path,
+    attach_measured_winner,
+    gemm_calibration_applies,
+    select_executable_path,
 )
 from shapefuse.scic import Site, classify_site
 from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, select_plan
@@ -83,6 +98,128 @@ class PathSelectionTests(unittest.TestCase):
         self.assertEqual(select_plan(mem, length=1).primary.mode, "MemMode")
         self.assertEqual(decide_gemm(GEMM_LEVELS["decode-prefill"][0], H100_SXM_FP16, Thresholds())[2], BASELINE_ALWAYS_FUSE)
         self.assertEqual(select_plan(comp, length=2048).primary.mode, "ComputeMode")
+
+
+class CalibrationOverrideTests(unittest.TestCase):
+    def _compute_gemm(self):
+        shape = next(s for s in GEMM_LEVELS["decode-prefill"] if s.label == "prefill_m2048")
+        report, decision, chosen = decide_gemm(shape, A40_FP16, Thresholds())
+        self.assertEqual(chosen, BASELINE_ALWAYS_UNFUSE)
+        self.assertTrue(gemm_calibration_applies(decision, "ridge-compute"))
+        self.assertEqual(analytical_executable_path(decision), BASELINE_ALWAYS_UNFUSE)
+        return shape, report, decision
+
+    def test_faster_fuse_probe_overrides_compute_gemm(self) -> None:
+        shape, report, decision = self._compute_gemm()
+        calibration = calibration_from_medians(0.70, 0.88, repeats=3, warmup=1)
+        self.assertEqual(calibration.winner, BASELINE_ALWAYS_FUSE)
+        self.assertEqual(calibration.source, SELECTION_MEASURED)
+        self.assertIn(HONESTY_WALLCLOCK_NOT_DRAM, calibration.honesty)
+        self.assertIn(HONESTY_GPU_CONTENTION, calibration.honesty)
+        updated = attach_measured_winner(decision, calibration.winner)
+        chosen = select_executable_path(updated)
+        self.assertEqual(chosen, BASELINE_ALWAYS_FUSE)
+        self.assertEqual(updated.measured_winner, BASELINE_ALWAYS_FUSE)
+        self.assertEqual(analytical_executable_path(updated), BASELINE_ALWAYS_UNFUSE)
+        row = decision_row(
+            op="matmul_rmsnorm",
+            label=shape.label,
+            shape=shape.shape_key(),
+            report=report,
+            decision=updated,
+            chosen=chosen,
+            analytical=BASELINE_ALWAYS_UNFUSE,
+            calibration=calibration,
+        )
+        self.assertEqual(row["analytical_baseline"], BASELINE_ALWAYS_UNFUSE)
+        self.assertEqual(row["measured_winner"], BASELINE_ALWAYS_FUSE)
+        self.assertEqual(row["selected_baseline"], BASELINE_ALWAYS_FUSE)
+        self.assertEqual(row["selection_source"], SELECTION_MEASURED)
+        self.assertEqual(row["calibration_fuse_ms"], 0.70)
+        self.assertEqual(row["calibration_unfuse_ms"], 0.88)
+        self.assertFalse(row["quote_as_scic_accuracy"])
+        self.assertFalse(row["nsight_used"])
+        flags = scic_selection_honesty(calibration, BASELINE_ALWAYS_UNFUSE, chosen)
+        self.assertIn(HONESTY_MEASURED_OVERRIDE, flags)
+        self.assertIn(HONESTY_WALLCLOCK_NOT_DRAM, flags)
+
+    def test_missing_or_tied_probe_keeps_the_analytical_baseline(self) -> None:
+        _shape, report, decision = self._compute_gemm()
+        for fuse_ms, unfuse_ms in ((None, 1.0), (1.0, None), (1.0, 1.0), (float("nan"), 1.0)):
+            calibration = calibration_from_medians(fuse_ms, unfuse_ms, repeats=1, warmup=1)
+            self.assertEqual(calibration.winner, "")
+            self.assertEqual(calibration.source, SELECTION_ANALYTICAL_FALLBACK)
+            self.assertIn(HONESTY_ANALYTICAL_FALLBACK, calibration.honesty)
+            chosen = select_executable_path(attach_measured_winner(decision, calibration.winner or None))
+            self.assertEqual(chosen, BASELINE_ALWAYS_UNFUSE)
+        skipped = skipped_calibration(SELECTION_ANALYTICAL, "outside scope")
+        self.assertFalse(skipped.attempted)
+        self.assertEqual(skipped.winner, "")
+        row = decision_row(
+            op="matmul_rmsnorm",
+            label="decode_m1",
+            shape="M=1,N=4096,K=4096",
+            report=report,
+            decision=decision,
+            chosen=BASELINE_ALWAYS_UNFUSE,
+            analytical=BASELINE_ALWAYS_UNFUSE,
+            calibration=skipped,
+        )
+        self.assertEqual(row["selection_source"], SELECTION_ANALYTICAL)
+        self.assertEqual(row["measured_winner"], "")
+        self.assertEqual(row["analytical_baseline"], BASELINE_ALWAYS_UNFUSE)
+
+    def test_ridge_compute_scope_skips_memory_gemm_and_attention(self) -> None:
+        thresholds = Thresholds()
+        by_label = {
+            shape.label: decide_gemm(shape, A40_FP16, thresholds)[1]
+            for shape in GEMM_LEVELS["decode-prefill"]
+        }
+        for label in ("decode_m1", "decode_m32"):
+            self.assertFalse(gemm_calibration_applies(by_label[label], "ridge-compute"))
+            self.assertTrue(gemm_calibration_applies(by_label[label], "all-gemm"))
+        for label in ("ridge_m128", "ridge_m256", "ridge_m512", "prefill_m2048", "prefill_m4096"):
+            self.assertTrue(gemm_calibration_applies(by_label[label], "ridge-compute"))
+        self.assertFalse(gemm_calibration_applies(by_label["prefill_m2048"], "off"))
+        attn = decide_attention(ATTN_LEVELS["decode-prefill"][2], A40_FP16, thresholds)[1]
+        self.assertEqual(attn.primary.mode, "ComputeMode")
+        self.assertFalse(gemm_calibration_applies(attn, "all-gemm"))
+        self.assertEqual(select_executable_path(attn), BASELINE_ALWAYS_FUSE)
+
+    def test_override_honesty_lands_on_the_scic_latency_row(self) -> None:
+        shape, report, decision = self._compute_gemm()
+        calibration = calibration_from_medians(0.4, 0.5, repeats=3, warmup=1)
+        updated = attach_measured_winner(decision, calibration.winner)
+        chosen = select_executable_path(updated)
+        rows = assemble_latency_rows(
+            op="matmul_rmsnorm",
+            label=shape.label,
+            shape=shape.shape_key(),
+            baselines=("eager_unfused", "always_fuse", "always_unfuse", "scic_selected"),
+            measurements={
+                "eager_unfused": Measurement(1.0, True, "", "EAGER"),
+                "always_fuse": Measurement(0.4, True, "", "FUSE"),
+                "always_unfuse": Measurement(0.9, True, "", "UNFUSE"),
+            },
+            chosen=chosen,
+            report=report,
+            emit_both=decision.emit_both,
+            primary_mode=decision.primary.mode,
+            fuse_epilogue=decision.primary.fuse_epilogue,
+            placeholder=False,
+            backend="cuda-torch",
+            device_name="NVIDIA A40",
+            dtype_ran="fp16",
+            selection_honesty=scic_selection_honesty(calibration, BASELINE_ALWAYS_UNFUSE, chosen),
+        )
+        scic = next(row for row in rows if row["baseline"] == BASELINE_SCIC)
+        self.assertEqual(scic["median_ms"], 0.4)
+        self.assertEqual(scic["timing_copied_from"], BASELINE_ALWAYS_FUSE)
+        self.assertEqual(scic["selected_baseline"], BASELINE_ALWAYS_FUSE)
+        self.assertIn(HONESTY_MEASURED_OVERRIDE, scic["honesty"])
+        self.assertIn(HONESTY_WALLCLOCK_NOT_DRAM, scic["honesty"])
+        self.assertIn(HONESTY_GPU_CONTENTION, scic["honesty"])
+        self.assertFalse(scic["quote_as_scic_accuracy"])
 
 
 class AssembleTests(unittest.TestCase):
@@ -301,6 +438,10 @@ class BakeoffCliTests(unittest.TestCase):
                 decisions = list(csv.DictReader(fh))
             gemm = next(row for row in decisions if row["label"] == "decode_m1" and row["op"] == "matmul_rmsnorm")
             self.assertEqual(gemm["selected_baseline"], "always_fuse")
+            self.assertEqual(gemm["analytical_baseline"], "always_fuse")
+            self.assertEqual(gemm["measured_winner"], "")
+            self.assertEqual(gemm["selection_source"], "analytical")
+            self.assertEqual(gemm["calibration_attempted"], "false")
             self.assertEqual(gemm["primary_mode"], "MemMode")
             self.assertEqual(gemm["quote_as_scic_accuracy"], "false")
             attn = [row for row in decisions if row["op"] == "attention"]
@@ -310,6 +451,53 @@ class BakeoffCliTests(unittest.TestCase):
                 self.assertEqual(row["claims_fa3"], "false")
                 self.assertEqual(row["epilogue_policy"], "compile_sdpa_chain")
                 self.assertEqual(row["selected_baseline"], "always_fuse")
+                self.assertEqual(row["selection_source"], "library_sdpa")
+                self.assertEqual(row["measured_winner"], "")
+                self.assertIn("LIBRARY_SDPA_NOT_WALLCLOCK_CALIBRATED", row["calibration_honesty"])
+            summary_cal = summary["gemm_calibration"]
+            self.assertEqual(summary_cal["scope"], "ridge-compute")
+            self.assertTrue(summary_cal["not_dram_ai"])
+            self.assertTrue(summary_cal["gpu_contention_can_flip_winner"])
+            self.assertFalse(summary_cal["quote_as_scic_accuracy"])
+
+    def test_cpu_all_gemm_probe_falls_back_without_cuda_compile(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "bakeoff"
+            code = main(
+                [
+                    "bakeoff",
+                    "--out",
+                    str(dest),
+                    "--device",
+                    "cpu",
+                    "--level",
+                    "smoke",
+                    "--skip-max-autotune",
+                    "--machine",
+                    "A40_FP16",
+                    "--calibrate",
+                    "all-gemm",
+                ]
+            )
+            self.assertEqual(code, 0)
+            with (dest / "bakeoff_decisions.csv").open(encoding="utf-8") as fh:
+                decisions = list(csv.DictReader(fh))
+            gemm_rows = [row for row in decisions if row["op"] == "matmul_rmsnorm"]
+            self.assertTrue(gemm_rows)
+            for row in gemm_rows:
+                self.assertEqual(row["calibration_attempted"], "true")
+                self.assertEqual(row["selection_source"], "analytical_fallback")
+                self.assertEqual(row["measured_winner"], "")
+                self.assertEqual(row["selected_baseline"], row["analytical_baseline"])
+                self.assertIn("WALLCLOCK_CALIBRATION_NOT_DRAM_AI", row["calibration_honesty"])
+                self.assertIn("ANALYTICAL_FALLBACK_NO_MEASURED_WINNER", row["calibration_honesty"])
+                self.assertIn("GPU_CONTENTION_CAN_FLIP_WINNER", row["calibration_honesty"])
+                self.assertEqual(row["quote_as_scic_accuracy"], "false")
+            decode = next(row for row in gemm_rows if row["label"] == "decode_m1")
+            self.assertEqual(decode["analytical_baseline"], "always_fuse")
+            self.assertEqual(decode["selected_baseline"], "always_fuse")
 
     def test_script_does_not_call_nsight(self) -> None:
         text = Path("scripts/run_baseline_bakeoff.sh").read_text(encoding="utf-8")
@@ -321,6 +509,12 @@ class BakeoffCliTests(unittest.TestCase):
         self.assertIn("--attention", text)
         self.assertIn("cache_size_limit", text)
         self.assertIn("Idle GPU", text)
+        self.assertIn("--calibrate", text)
+        self.assertIn("not DRAM", text)
+        readme = Path("README.md").read_text(encoding="utf-8")
+        self.assertIn("bash scripts/run_baseline_bakeoff.sh", readme)
+        self.assertIn("not DRAM", readme)
+        self.assertIn("busy gpu", readme.lower())
 
 
 if __name__ == "__main__":

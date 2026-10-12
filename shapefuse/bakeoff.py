@@ -21,9 +21,15 @@ What each baseline actually is:
 - ``scic_selected``: copies the median of ``always_fuse`` or
   ``always_unfuse`` according to :func:`select_executable_path`. It is
   not a third kernel. Attention copies ``always_fuse``
-  (``compile_sdpa_chain``) in every regime. ``paper/data/bakeoff_v2``
-  is that wall-clock. The GPU was not idle. GEMM ComputeMode still
-  copies ``always_unfuse``; calibrating that choice is TODO.
+  (``compile_sdpa_chain``) in every regime, including when a GEMM probe
+  would have preferred the other path. ``paper/data/bakeoff_v2`` is the
+  wall-clock of that attention policy. The GPU was not idle. GEMM in the
+  ridge band and on the compute side (or every GEMM shape, with
+  ``--calibrate all-gemm``) takes a few-shot wall-clock of ``always_fuse``
+  versus ``always_unfuse``. ``selected_baseline`` follows ``measured_winner``
+  when that probe returns one, and otherwise keeps the analytical baseline.
+  The probe is median latency on this machine. It is not DRAM AI. A busy
+  GPU can flip the winner. ``paper/data/bakeoff_v2`` predates the probe.
 
 ``quote_as_scic_accuracy`` is false. Profiler bytes are not read.
 Stage-Stream is not involved.
@@ -55,33 +61,49 @@ from shapefuse.plan_paths import (
     BASELINE_EAGER,
     BASELINE_SCIC,
     BASELINE_SDPA,
+    CALIBRATION_SCOPE_RIDGE_COMPUTE,
+    CALIBRATION_SCOPES,
     GEMM_BASELINES,
     HONESTY_ALWAYS_FUSE_ATTN,
     HONESTY_ALWAYS_FUSE_GEMM,
     HONESTY_ALWAYS_UNFUSE_ATTN,
     HONESTY_ALWAYS_UNFUSE_GEMM,
+    HONESTY_ANALYTICAL_FALLBACK,
+    HONESTY_ATTN_NOT_CALIBRATED,
     HONESTY_ATTN_OOM,
+    HONESTY_CALIBRATION_AGREES,
     HONESTY_COMPILE_DEFAULT,
     HONESTY_COMPILE_FAILED,
     HONESTY_COMPILE_SKIPPED_CPU,
     HONESTY_EAGER_ATTN,
     HONESTY_EAGER_GEMM,
+    HONESTY_GPU_CONTENTION,
     HONESTY_MAX_AUTOTUNE,
     HONESTY_MAX_AUTOTUNE_FAILED,
     HONESTY_MAX_AUTOTUNE_NOT_FEASIBLE,
     HONESTY_MAX_AUTOTUNE_SKIPPED,
     HONESTY_LIBRARY_SDPA_CHAIN,
     HONESTY_LIBRARY_SDPA_NOT_PRIMARY,
+    HONESTY_MEASURED_OVERRIDE,
     HONESTY_RIDGE_PRIMARY_ONLY,
     HONESTY_SCIC_COPIED,
     HONESTY_SCIC_MISSING,
     HONESTY_SDPA,
     HONESTY_SDPA_UNAVAILABLE,
+    HONESTY_WALLCLOCK_NOT_DRAM,
+    SELECTION_ANALYTICAL,
+    SELECTION_ANALYTICAL_FALLBACK,
+    SELECTION_LIBRARY_SDPA,
+    SELECTION_MEASURED,
+    analytical_executable_path,
+    attach_measured_winner,
     common_honesty,
+    gemm_calibration_applies,
     join_honesty,
+    pick_wallclock_winner,
     select_executable_path,
 )
-from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, select_plan
+from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, PlanCache, select_plan
 from shapefuse.scic import IntensityReport, Site, classify_site
 
 OP_GEMM = "matmul_rmsnorm"
@@ -125,6 +147,33 @@ class Measurement:
     honesty: str
     timing_copied_from: str = ""
     extra_fn: object | None = field(default=None, repr=False, compare=False)
+
+
+# Few-shot, not the bakeoff's 10-repeat sample. Override with the environment.
+CALIBRATION_REPEATS = 3
+CALIBRATION_WARMUP = 1
+CALIBRATION_METRIC = "wallclock_median_ms"
+
+
+@dataclass(frozen=True)
+class WallclockCalibration:
+    """Few-shot fuse versus unfuse medians, or an explicit skip.
+
+    ``winner`` is ``always_fuse``, ``always_unfuse``, or empty. Empty means
+    the analytical or library baseline stands. Times are milliseconds.
+    They are wall-clock on this process, not DRAM bytes.
+    """
+
+    attempted: bool
+    winner: str
+    fuse_ms: float | None
+    unfuse_ms: float | None
+    repeats: int
+    warmup: int
+    source: str
+    honesty: str
+    note: str
+    metric: str = CALIBRATION_METRIC
 
 
 # N = K = 64 keeps the CPU schema check small. Every shape here is
@@ -228,6 +277,7 @@ def assemble_latency_rows(
     backend: str,
     device_name: str,
     dtype_ran: str,
+    selection_honesty: str = "",
 ) -> list[dict]:
     """Build CSV rows. ``scic_selected`` copies ``chosen`` and does not retime."""
     attention = op == OP_ATTN
@@ -252,6 +302,7 @@ def assemble_latency_rows(
                 attention,
                 placeholder,
                 library_override=library_override,
+                extra_honesty=selection_honesty,
             )
             copied = chosen if meas.ok else ""
         else:
@@ -307,6 +358,8 @@ def decision_row(
     report: IntensityReport,
     decision,
     chosen: str,
+    analytical: str,
+    calibration: WallclockCalibration,
 ) -> dict:
     alternate = "" if decision.alternate is None else decision.alternate.mode
     return {
@@ -327,7 +380,18 @@ def decision_row(
         "fuse_epilogue": decision.primary.fuse_epilogue,
         "epilogue_policy": decision.epilogue_policy,
         "materialize_intermediate": decision.primary.materialize_intermediate,
+        "analytical_baseline": analytical,
+        "measured_winner": calibration.winner,
+        "selection_source": calibration.source,
         "selected_baseline": chosen,
+        "calibration_attempted": calibration.attempted,
+        "calibration_fuse_ms": calibration.fuse_ms,
+        "calibration_unfuse_ms": calibration.unfuse_ms,
+        "calibration_repeats": calibration.repeats if calibration.attempted else None,
+        "calibration_warmup": calibration.warmup if calibration.attempted else None,
+        "calibration_metric": calibration.metric if calibration.attempted else "",
+        "calibration_honesty": calibration.honesty,
+        "calibration_note": calibration.note,
         "cache_key": decision.cache_key,
         "rationale": decision.rationale,
         "quote_as_scic_accuracy": False,
@@ -337,6 +401,112 @@ def decision_row(
         "nsight_used": False,
         "kernel_emitted": False,
     }
+
+
+def skipped_calibration(source: str, note: str, honesty: str = "") -> WallclockCalibration:
+    """No probe ran. ``source`` is ``analytical`` or ``library_sdpa``."""
+    return WallclockCalibration(
+        attempted=False,
+        winner="",
+        fuse_ms=None,
+        unfuse_ms=None,
+        repeats=0,
+        warmup=0,
+        source=source,
+        honesty=honesty,
+        note=note,
+        metric="",
+    )
+
+
+def calibration_from_medians(
+    fuse_ms: float | None,
+    unfuse_ms: float | None,
+    *,
+    repeats: int,
+    warmup: int,
+    fuse_error: str = "",
+    unfuse_error: str = "",
+) -> WallclockCalibration:
+    """Turn two probe medians into a decision-log record.
+
+    The strictly faster positive finite median becomes ``measured_winner``.
+    A miss or a tie keeps the analytical baseline and says so.
+    """
+    winner = pick_wallclock_winner(fuse_ms, unfuse_ms) or ""
+    notes: list[str] = []
+    if fuse_ms is None:
+        notes.append(fuse_error or "always_fuse probe did not return a median")
+    if unfuse_ms is None:
+        notes.append(unfuse_error or "always_unfuse probe did not return a median")
+    if (
+        not winner
+        and fuse_ms is not None
+        and unfuse_ms is not None
+        and fuse_ms == unfuse_ms
+        and fuse_ms > 0
+    ):
+        notes.append("tie; analytical baseline kept")
+    if winner:
+        source = SELECTION_MEASURED
+        honesty = join_honesty(HONESTY_WALLCLOCK_NOT_DRAM, HONESTY_GPU_CONTENTION)
+        if not notes:
+            notes.append(
+                "few-shot wall-clock on this machine; not DRAM AI; "
+                "GPU contention can flip the winner"
+            )
+    else:
+        source = SELECTION_ANALYTICAL_FALLBACK
+        honesty = join_honesty(
+            HONESTY_WALLCLOCK_NOT_DRAM,
+            HONESTY_GPU_CONTENTION,
+            HONESTY_ANALYTICAL_FALLBACK,
+        )
+        if not notes:
+            notes.append("probe did not produce a strictly faster path")
+    return WallclockCalibration(
+        attempted=True,
+        winner=winner,
+        fuse_ms=fuse_ms,
+        unfuse_ms=unfuse_ms,
+        repeats=repeats,
+        warmup=warmup,
+        source=source,
+        honesty=honesty,
+        note="; ".join(notes),
+    )
+
+
+def scic_selection_honesty(calibration: WallclockCalibration, analytical: str, chosen: str) -> str:
+    """Flags for the ``scic_selected`` latency row. Empty when no probe ran."""
+    if calibration.source == SELECTION_MEASURED:
+        relation = (
+            HONESTY_MEASURED_OVERRIDE if chosen != analytical else HONESTY_CALIBRATION_AGREES
+        )
+        return join_honesty(HONESTY_WALLCLOCK_NOT_DRAM, HONESTY_GPU_CONTENTION, relation)
+    if calibration.source == SELECTION_ANALYTICAL_FALLBACK:
+        return join_honesty(HONESTY_WALLCLOCK_NOT_DRAM, HONESTY_ANALYTICAL_FALLBACK)
+    return ""
+
+
+def calibration_budget() -> tuple[int, int]:
+    """``(repeats, warmup)`` for the GEMM probe. Defaults are 3 and 1."""
+    return (
+        _positive_int(os.environ.get("CALIBRATION_REPEATS"), CALIBRATION_REPEATS),
+        _positive_int(os.environ.get("CALIBRATION_WARMUP"), CALIBRATION_WARMUP),
+    )
+
+
+def _positive_int(raw: str | None, default: int) -> int:
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 1:
+        return default
+    return value
 
 
 def run_bakeoff(
@@ -353,10 +523,14 @@ def run_bakeoff(
     warmup: int | None,
     mem_frac: float,
     compute_frac: float,
+    calibrate: str = CALIBRATION_SCOPE_RIDGE_COMPUTE,
 ) -> dict:
     if level not in GEMM_LEVELS:
         known = ", ".join(sorted(GEMM_LEVELS))
         raise ValueError(f"Unknown bakeoff level {level!r}. Known: {known}")
+    if calibrate not in CALIBRATION_SCOPES:
+        known = ", ".join(CALIBRATION_SCOPES)
+        raise ValueError(f"Unknown calibration scope {calibrate!r}. Known: {known}")
     machine = get_machine(machine_name)
     thresholds = Thresholds(mem_frac, compute_frac)
     dynamo_limit = configure_dynamo_cache_limit()
@@ -367,6 +541,14 @@ def run_bakeoff(
             f"Dynamo cache_size_limit={dynamo_limit}. "
             "Graphs are not inspected. An idle GPU is recommended."
         )
+    cal_repeats, cal_warmup = calibration_budget()
+    print(
+        f"GEMM calibration scope={calibrate}. "
+        f"Probe repeats={cal_repeats} warmup={cal_warmup}. "
+        "The probe is wall-clock on this machine, not DRAM AI. "
+        "A busy GPU can flip measured_winner. "
+        "Attention stays compile_sdpa_chain."
+    )
     ctx = resolve_backend(device, require_cuda, allow_cpu_fallback)
     cuda = ctx.backend == "cuda-torch"
     if repeats is None:
@@ -377,9 +559,51 @@ def run_bakeoff(
 
     latency_rows: list[dict] = []
     decisions: list[dict] = []
+    cache = PlanCache()
     for shape in GEMM_LEVELS[level]:
-        report, decision, chosen = decide_gemm(shape, machine, thresholds)
-        _log_decision(OP_GEMM, shape.label, report, decision, chosen)
+        report, decision, _ = decide_gemm(shape, machine, thresholds)
+        analytical = analytical_executable_path(decision)
+        probe = gemm_calibration_applies(decision, calibrate)
+        try:
+            measured, calibration = _time_gemm(
+                shape,
+                ctx,
+                repeats,
+                warmup,
+                skip_max_autotune,
+                calibrate=probe,
+            )
+        except Exception as exc:
+            measured = _failed_baselines(GEMM_BASELINES, ctx, _exc_text(exc), attention=False)
+            if probe:
+                calibration = calibration_from_medians(
+                    None,
+                    None,
+                    repeats=cal_repeats,
+                    warmup=cal_warmup,
+                    fuse_error=_exc_text(exc),
+                    unfuse_error=_exc_text(exc),
+                )
+            else:
+                calibration = skipped_calibration(SELECTION_ANALYTICAL, _exc_text(exc))
+        if calibration.winner:
+            decision = attach_measured_winner(decision, calibration.winner)
+            winning_ms = (
+                calibration.fuse_ms
+                if calibration.winner == BASELINE_ALWAYS_FUSE
+                else calibration.unfuse_ms
+            )
+            if winning_ms is not None:
+                # The coarse bucket merges nearby M. Keep the shape label so
+                # ridge_m256 does not overwrite ridge_m512.
+                cache.record_measured_winner(
+                    f"{decision.cache_key}|{shape.label}",
+                    calibration.winner,
+                    CALIBRATION_METRIC,
+                    float(winning_ms),
+                )
+        chosen = select_executable_path(decision)
+        _log_decision(OP_GEMM, shape.label, report, decision, chosen, analytical, calibration)
         decisions.append(
             decision_row(
                 op=OP_GEMM,
@@ -388,12 +612,10 @@ def run_bakeoff(
                 report=report,
                 decision=decision,
                 chosen=chosen,
+                analytical=analytical,
+                calibration=calibration,
             )
         )
-        try:
-            measured = _time_gemm(shape, ctx, repeats, warmup, skip_max_autotune)
-        except Exception as exc:
-            measured = _failed_baselines(GEMM_BASELINES, ctx, _exc_text(exc), attention=False)
         latency_rows.extend(
             assemble_latency_rows(
                 op=OP_GEMM,
@@ -411,12 +633,19 @@ def run_bakeoff(
                 backend=ctx.backend,
                 device_name=ctx.device_name,
                 dtype_ran="fp16" if cuda else "fp32",
+                selection_honesty=scic_selection_honesty(calibration, analytical, chosen),
             )
         )
     if attention:
+        library = skipped_calibration(
+            SELECTION_LIBRARY_SDPA,
+            "library SDPA stays compile_sdpa_chain; the GEMM wall-clock probe is not applied",
+            HONESTY_ATTN_NOT_CALIBRATED,
+        )
         for shape in ATTN_LEVELS[level]:
             report, decision, chosen = decide_attention(shape, machine, thresholds)
-            _log_decision(OP_ATTN, shape.label, report, decision, chosen)
+            analytical = analytical_executable_path(decision)
+            _log_decision(OP_ATTN, shape.label, report, decision, chosen, analytical, library)
             decisions.append(
                 decision_row(
                     op=OP_ATTN,
@@ -425,6 +654,8 @@ def run_bakeoff(
                     report=report,
                     decision=decision,
                     chosen=chosen,
+                    analytical=analytical,
+                    calibration=library,
                 )
             )
             try:
@@ -464,6 +695,10 @@ def run_bakeoff(
         latency_rows=latency_rows,
         decisions=decisions,
         thresholds=thresholds,
+        calibrate=calibrate,
+        calibration_repeats=cal_repeats,
+        calibration_warmup=cal_warmup,
+        plan_cache_entries=len(cache.entries),
     )
     write_json(out / "bakeoff_summary.json", summary)
     (out / "SEND_BACK.txt").write_text(_send_back(out, summary), encoding="utf-8")
@@ -489,6 +724,7 @@ def main_bakeoff(args) -> int:
             warmup=getattr(args, "warmup", None),
             mem_frac=args.mem_frac,
             compute_frac=args.compute_frac,
+            calibrate=getattr(args, "calibrate", CALIBRATION_SCOPE_RIDGE_COMPUTE),
         )
     except CudaUnavailable as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -540,8 +776,11 @@ def _scic_measurement(
     attention: bool,
     placeholder: bool,
     library_override: bool = False,
+    extra_honesty: str = "",
 ) -> Measurement:
     extra = [HONESTY_SCIC_COPIED, f"TIMING_COPIED_FROM_{chosen}"]
+    if extra_honesty:
+        extra.append(extra_honesty)
     if library_override:
         extra.append(HONESTY_LIBRARY_SDPA_CHAIN)
         extra.append(HONESTY_LIBRARY_SDPA_NOT_PRIMARY)
@@ -576,7 +815,15 @@ def _speedup(eager_ms: float | None, this_ms: float | None) -> float | None:
     return eager_ms / this_ms
 
 
-def _log_decision(op: str, label: str, report: IntensityReport, decision, chosen: str) -> None:
+def _log_decision(
+    op: str,
+    label: str,
+    report: IntensityReport,
+    decision,
+    chosen: str,
+    analytical: str,
+    calibration: WallclockCalibration,
+) -> None:
     print(
         "SCIC"
         f" op={op}"
@@ -586,14 +833,24 @@ def _log_decision(op: str, label: str, report: IntensityReport, decision, chosen
         f" emit_both={str(decision.emit_both).lower()}"
         f" fuse_epilogue={str(decision.primary.fuse_epilogue).lower()}"
         f" epilogue_policy={decision.epilogue_policy or '-'}"
+        f" analytical={analytical}"
+        f" measured={calibration.winner or '-'}"
+        f" source={calibration.source}"
         f" -> {chosen}"
     )
 
 
-def _time_gemm(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: int, skip_max_autotune: bool):
+def _time_gemm(
+    shape: GemmShape,
+    ctx: BenchContext,
+    repeats: int,
+    warmup: int,
+    skip_max_autotune: bool,
+    calibrate: bool,
+):
     if ctx.backend == "cpu-numpy":
-        return _time_gemm_numpy(shape, ctx, repeats, warmup)
-    return _time_gemm_torch(shape, ctx, repeats, warmup, skip_max_autotune)
+        return _time_gemm_numpy(shape, ctx, repeats, warmup, calibrate)
+    return _time_gemm_torch(shape, ctx, repeats, warmup, skip_max_autotune, calibrate)
 
 
 def _time_attention(shape: AttnShape, ctx: BenchContext, repeats: int, warmup: int, skip_max_autotune: bool):
@@ -602,7 +859,13 @@ def _time_attention(shape: AttnShape, ctx: BenchContext, repeats: int, warmup: i
     return _time_attention_torch(shape, ctx, repeats, warmup, skip_max_autotune)
 
 
-def _time_gemm_numpy(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: int) -> dict[str, Measurement]:
+def _time_gemm_numpy(
+    shape: GemmShape,
+    ctx: BenchContext,
+    repeats: int,
+    warmup: int,
+    calibrate: bool,
+) -> tuple[dict[str, Measurement], WallclockCalibration]:
     rng = np.random.default_rng(0)
     a = rng.standard_normal((shape.m, shape.k), dtype=np.float32)
     b = rng.standard_normal((shape.k, shape.n), dtype=np.float32)
@@ -617,16 +880,40 @@ def _time_gemm_numpy(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: 
     unfuse = _measure_cpu(chain, repeats, warmup, _spec(ctx, HONESTY_ALWAYS_UNFUSE_GEMM, attention=False))
     skipped_compile = _skipped_compile(ctx, attention=False)
     skipped_max = _skipped_max_autotune(ctx, skipped_by_flag=True, attention=False)
-    return {
+    measurements = {
         BASELINE_EAGER: eager,
         BASELINE_COMPILE_DEFAULT: skipped_compile,
         BASELINE_COMPILE_MAX_AUTOTUNE: skipped_max,
         BASELINE_ALWAYS_FUSE: _fuse_unavailable(ctx, attention=False, reason=skipped_compile.error),
         BASELINE_ALWAYS_UNFUSE: unfuse,
     }
+    if not calibrate:
+        calibration = skipped_calibration(
+            SELECTION_ANALYTICAL,
+            "datasheet baseline; this GEMM shape is outside the calibration scope",
+        )
+    else:
+        # Eager versus eager would be a fake tie. Compile does not run here.
+        cal_repeats, cal_warmup = calibration_budget()
+        calibration = calibration_from_medians(
+            None,
+            None,
+            repeats=cal_repeats,
+            warmup=cal_warmup,
+            fuse_error="torch.compile is not run on the NumPy path",
+            unfuse_error="wall-clock probe needs both always_fuse and always_unfuse",
+        )
+    return measurements, calibration
 
 
-def _time_gemm_torch(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: int, skip_max_autotune: bool):
+def _time_gemm_torch(
+    shape: GemmShape,
+    ctx: BenchContext,
+    repeats: int,
+    warmup: int,
+    skip_max_autotune: bool,
+    calibrate: bool,
+):
     import torch
 
     cuda = ctx.backend == "cuda-torch"
@@ -643,6 +930,15 @@ def _time_gemm_torch(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: 
         var = (c * c).mean(dim=-1, keepdim=True)
         return c * torch.rsqrt(var + 1e-6) * weight
 
+    compiled_fn = None
+    if calibrate:
+        calibration, compiled_fn = _probe_gemm_chain(chain, ctx, cuda)
+    else:
+        calibration = skipped_calibration(
+            SELECTION_ANALYTICAL,
+            "datasheet baseline; this GEMM shape is outside the calibration scope",
+        )
+
     eager = _measure_torch(chain, repeats, warmup, cuda, _spec(ctx, HONESTY_EAGER_GEMM, attention=False))
     unfuse = _measure_torch(chain, repeats, warmup, cuda, _spec(ctx, HONESTY_ALWAYS_UNFUSE_GEMM, attention=False))
     compiled = _compile_measurement(
@@ -654,6 +950,7 @@ def _time_gemm_torch(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: 
         ctx=ctx,
         specific=HONESTY_COMPILE_DEFAULT,
         attention=False,
+        compiled_fn=compiled_fn,
     )
     fuse = _compile_measurement(
         chain,
@@ -664,7 +961,7 @@ def _time_gemm_torch(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: 
         ctx=ctx,
         specific=HONESTY_ALWAYS_FUSE_GEMM,
         attention=False,
-        compiled_fn=compiled.extra_fn,
+        compiled_fn=compiled.extra_fn or compiled_fn,
     )
     if not cuda:
         # Reuse the single CPU compile attempt for always_fuse. A second
@@ -673,13 +970,51 @@ def _time_gemm_torch(shape: GemmShape, ctx: BenchContext, repeats: int, warmup: 
     max_auto = _max_autotune_measurement(
         chain, ctx, cuda, skip_max_autotune, repeats, warmup, attention=False
     )
-    return {
-        BASELINE_EAGER: eager,
-        BASELINE_COMPILE_DEFAULT: compiled,
-        BASELINE_COMPILE_MAX_AUTOTUNE: max_auto,
-        BASELINE_ALWAYS_FUSE: fuse,
-        BASELINE_ALWAYS_UNFUSE: unfuse,
-    }
+    return (
+        {
+            BASELINE_EAGER: eager,
+            BASELINE_COMPILE_DEFAULT: compiled,
+            BASELINE_COMPILE_MAX_AUTOTUNE: max_auto,
+            BASELINE_ALWAYS_FUSE: fuse,
+            BASELINE_ALWAYS_UNFUSE: unfuse,
+        },
+        calibration,
+    )
+
+
+def _probe_gemm_chain(chain, ctx: BenchContext, cuda: bool) -> tuple[WallclockCalibration, object | None]:
+    """One warmup and a few timed iterations of fuse versus unfuse.
+
+    The compiled function is returned so the full bakeoff can reuse it.
+    Without CUDA, ``torch.compile`` does not run and the winner stays empty.
+    """
+    repeats, warmup = calibration_budget()
+    unfuse = _measure_torch(
+        chain,
+        repeats,
+        warmup,
+        cuda,
+        _spec(ctx, HONESTY_ALWAYS_UNFUSE_GEMM, attention=False),
+    )
+    fuse = _compile_measurement(
+        chain,
+        mode=None,
+        repeats=repeats,
+        warmup=warmup,
+        cuda=cuda,
+        ctx=ctx,
+        specific=HONESTY_ALWAYS_FUSE_GEMM,
+        attention=False,
+    )
+    calibration = calibration_from_medians(
+        fuse.median_ms if fuse.ok else None,
+        unfuse.median_ms if unfuse.ok else None,
+        repeats=repeats,
+        warmup=warmup,
+        fuse_error=fuse.error,
+        unfuse_error=unfuse.error,
+    )
+    return calibration, fuse.extra_fn
 
 
 def _time_attention_numpy(shape: AttnShape, ctx: BenchContext, repeats: int, warmup: int):
@@ -1083,6 +1418,10 @@ def _summary(
     latency_rows: list[dict],
     decisions: list[dict],
     thresholds: Thresholds,
+    calibrate: str,
+    calibration_repeats: int,
+    calibration_warmup: int,
+    plan_cache_entries: int,
 ) -> dict:
     ok = sum(1 for row in latency_rows if row["ok"])
     status = "PLACEHOLDER_NO_GPU" if ctx.placeholder else "BAKEOFF_WALLCLOCK"
@@ -1107,9 +1446,13 @@ def _summary(
             "The regime column uses the requested datasheet ridge. "
             "Library attention scores compile_sdpa_chain (always_fuse) for the "
             "epilogue, including in ridge and compute. paper/data/bakeoff is the "
-            "pre-fix selector. paper/data/bakeoff_v2 is the post-fix wall-clock "
-            "on a busy GPU. GEMM ComputeMode still selects always_unfuse; a "
-            "calibrated selector for ridge and compute GEMM is not implemented."
+            "pre-fix selector. paper/data/bakeoff_v2 is the attention-fix "
+            "wall-clock on a busy GPU and predates GEMM calibration. "
+            "Ridge and compute GEMM (scope ridge-compute) take a few-shot "
+            "wall-clock of always_fuse versus always_unfuse. selected_baseline "
+            "follows measured_winner when that probe returns one, else the "
+            "analytical baseline. The probe is wall-clock on this machine, not "
+            "DRAM AI. A busy GPU can flip the winner. It is not SCIC accuracy."
         ),
         "machine": machine.name,
         "ridge_flops_per_byte": machine.ridge,
@@ -1120,6 +1463,17 @@ def _summary(
         "skip_max_autotune": skip_max_autotune,
         "repeats": repeats,
         "warmup": warmup,
+        "gemm_calibration": {
+            "scope": calibrate,
+            "metric": CALIBRATION_METRIC,
+            "repeats": calibration_repeats,
+            "warmup": calibration_warmup,
+            "not_dram_ai": True,
+            "gpu_contention_can_flip_winner": True,
+            "quote_as_scic_accuracy": False,
+            "attention_policy": "compile_sdpa_chain",
+            "plan_cache_entries": plan_cache_entries,
+        },
         "backend": ctx.backend,
         "device_name": ctx.device_name,
         "torch_version": ctx.torch_version,
@@ -1129,6 +1483,7 @@ def _summary(
         "rows_ok": ok,
         "decisions": len(decisions),
         "selected_baseline_counts": _counts(decisions, "selected_baseline"),
+        "selection_source_counts": _counts(decisions, "selection_source"),
         "rows_file": "bakeoff_latency.csv",
         "decisions_file": "bakeoff_decisions.csv",
         "baselines_gemm": list(GEMM_BASELINES),
@@ -1142,9 +1497,10 @@ def _summary(
             "A measured ridge on this GPU",
             "End-to-end tokens/s",
             "Plan-switch overhead on a serving trace",
-            "A calibrated GEMM selector. Datasheet ComputeMode still maps to "
-            "always_unfuse. paper/data/bakeoff_v2 shows torch.compile faster on "
-            "ridge and compute GEMM. Not implemented",
+            "Nsight DRAM AI for the GEMM probe. measured_winner is wall-clock "
+            "on this machine. GPU contention can flip it. Not SCIC accuracy",
+            "A re-run of scripts/run_baseline_bakeoff.sh. paper/data/bakeoff_v2 "
+            "predates the probe and still copies always_unfuse on ridge and compute GEMM",
             "paper/data/bakeoff is the pre-fix attention selector. "
             "paper/data/bakeoff_v2 is the compile_sdpa_chain wall-clock on a busy GPU",
         ],
@@ -1191,7 +1547,11 @@ def _send_back(out: Path, summary: dict) -> str:
             "  - claim Stage-Stream ran",
             "",
             "scic_selected copies median_ms from timing_copied_from.",
-            "That column is always_fuse or always_unfuse. It is the plan SCIC picked.",
+            "That column is always_fuse or always_unfuse.",
+            "bakeoff_decisions.csv logs analytical_baseline, measured_winner, and selection_source.",
+            "measured_winner is a few-shot wall-clock on this machine, not DRAM AI.",
+            "A busy GPU can flip it. It is not SCIC accuracy.",
+            "Attention stays compile_sdpa_chain and is not wall-clock calibrated.",
             "",
             "Still TBD:",
             *[f"  - {item}" for item in summary["still_tbd"]],

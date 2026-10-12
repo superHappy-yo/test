@@ -12,7 +12,13 @@
 # custom MemMode or ComputeMode kernels. Stage-Stream is not run.
 #
 # Library attention scores compile_sdpa_chain (always_fuse) for the
-# epilogue. GEMM still unfuses on the compute side of the ridge.
+# epilogue. That path is not wall-clock calibrated.
+# GEMM in the ridge band and on the compute side takes a few-shot
+# wall-clock of always_fuse versus always_unfuse (not DRAM AI).
+# selected_baseline follows measured_winner when the probe returns one.
+# A busy GPU can flip that winner. paper/data/bakeoff_v2 predates the probe.
+# After pulling this change, re-run:
+#   bash scripts/run_baseline_bakeoff.sh
 # Run on an idle GPU. The bakeoff raises Dynamo cache_size_limit
 # (default 64, override with DYNAMO_CACHE_SIZE_LIMIT). The archived
 # A40 run was not idle and hit the default limit of 8.
@@ -25,6 +31,8 @@
 #   SKIP_MAX_AUTOTUNE=1 bash scripts/run_baseline_bakeoff.sh
 #   SKIP_ATTENTION=1 bash scripts/run_baseline_bakeoff.sh
 #   MACHINE=H100_SXM_FP16 bash scripts/run_baseline_bakeoff.sh
+#   CALIBRATE=all-gemm bash scripts/run_baseline_bakeoff.sh
+#   CALIBRATE=off bash scripts/run_baseline_bakeoff.sh
 #
 # Send back the output directory. The list is results/bakeoff/SEND_BACK.txt.
 set -euo pipefail
@@ -36,6 +44,7 @@ PYTHON="${PYTHON:-python3}"
 OUT="${OUT:-$ROOT/results/bakeoff}"
 MACHINE="${MACHINE:-A40_FP16}"
 LEVEL="${LEVEL:-decode-prefill}"
+CALIBRATE="${CALIBRATE:-ridge-compute}"
 
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
   "$PYTHON" -m pip install -r requirements.txt
@@ -67,7 +76,11 @@ echo "The archived A40 run was not idle (see paper/data/bakeoff/RUN_NOTES.txt)."
 echo "Dynamo cache_size_limit is raised inside the bakeoff (default 64)."
 echo "Override with DYNAMO_CACHE_SIZE_LIMIT. Graphs are still not inspected."
 echo "Nsight is not invoked. achieved AI and SCIC accuracy are not outputs of this script."
-echo "Attention epilogue policy is compile_sdpa_chain (always_fuse). Re-run after that change before quoting it."
+echo "Attention epilogue policy is compile_sdpa_chain (always_fuse). It is not wall-clock calibrated."
+echo "GEMM calibration scope: ${CALIBRATE} (ridge-compute, all-gemm, or off)."
+echo "The probe is a few-shot wall-clock of always_fuse vs always_unfuse. It is not DRAM AI."
+echo "A busy GPU can flip measured_winner. paper/data/bakeoff_v2 predates this probe."
+echo "After pulling the calibrated selector, re-run: bash scripts/run_baseline_bakeoff.sh"
 
 mkdir -p "$OUT"
 nvidia-smi >"$OUT/nvidia_smi.txt"
@@ -82,6 +95,7 @@ ARGS=(
   --machine "$MACHINE"
   --level "$LEVEL"
   --skip-plots
+  --calibrate "$CALIBRATE"
 )
 if [[ "${SKIP_ATTENTION:-0}" != "1" ]]; then
   ARGS+=(--attention)

@@ -28,6 +28,12 @@ class PlanTests(unittest.TestCase):
         self.assertIsNone(cache.lookup("k"))
         cache.record_measured_winner("k", "MemMode", "latency_s", 1.2e-5)
         self.assertEqual(cache.lookup("k")["mode"], "MemMode")
+        self.assertEqual(cache.lookup("k")["source"], "measured")
+        cache.record_measured_winner("gemm|m2048", "always_fuse", "wallclock_median_ms", 0.7)
+        stored = cache.lookup("gemm|m2048")
+        self.assertEqual(stored["mode"], "always_fuse")
+        self.assertEqual(stored["source"], "measured_wallclock")
+        self.assertEqual(stored["metric"], "wallclock_median_ms")
 
     def test_no_kernel_and_no_measured_winner_by_default(self) -> None:
         bundle = build_sweeps(H100_SXM_FP16)

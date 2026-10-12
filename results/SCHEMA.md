@@ -36,7 +36,7 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | `bandwidth_estimate.json` | optional copy-kernel estimate from `scripts/bandwidth_probe.sh`. Status `ESTIMATE_COPY_NOT_NSIGHT`. Not a measured ridge |
 | `SEND_BACK.txt` | checklist of what to return |
 | `bakeoff_latency.csv` | from `python -m shapefuse bakeoff` or `scripts/run_baseline_bakeoff.sh`. Columns include `baseline`, `shape`, `median_ms`, `speedup_vs_eager`, `honesty`. No Nsight. `quote_as_scic_accuracy` is false. `sdpa` is not FlashAttention-3. `scic_selected` copies another row's median |
-| `bakeoff_decisions.csv` | SCIC regime, MemMode or ComputeMode, `epilogue_policy`, and `selected_baseline`. GEMM uses `always_fuse` or `always_unfuse`. Library attention scores `compile_sdpa_chain` and times `always_fuse`. `paper/data/bakeoff/` is the pre-fix selector. `paper/data/bakeoff_v2/` is the post-fix wall-clock on a busy GPU. Ridge and compute GEMM still select `always_unfuse`; a calibrated selector is TODO |
+| `bakeoff_decisions.csv` | SCIC regime, MemMode or ComputeMode, `epilogue_policy`, `analytical_baseline`, `measured_winner`, `selection_source`, and `selected_baseline`. GEMM uses `always_fuse` or `always_unfuse`. `selected_baseline` follows `measured_winner` when a few-shot wall-clock probe returns one, and otherwise keeps `analytical_baseline`. The probe is wall-clock on this machine, not DRAM AI. A busy GPU can flip it. Library attention scores `compile_sdpa_chain`, times `always_fuse`, and is not part of the probe (`selection_source=library_sdpa`). `paper/data/bakeoff/` is the pre-fix selector. `paper/data/bakeoff_v2/` is the attention-fix wall-clock on a busy GPU and predates GEMM calibration |
 | `bakeoff_summary.json` | `BAKEOFF_WALLCLOCK` on CUDA, `PLACEHOLDER_NO_GPU` otherwise. `nsight_used` is false |
 
 ## Fields that stay empty until a human measures them
@@ -44,7 +44,7 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 - `achieved_ai`, until a Nsight JSON is ingested (`--nsight-json` or `TRY_NSIGHT=1`)
 - `proxy_ai` is allowed to be filled by `--profile torch`. Profiler events stay labeled `TORCH_PROFILER_MEMORY_NOT_DRAM`. A caching-allocator fallback is `TORCH_ALLOCATOR_DELTA_NOT_DRAM`. `TORCH_PROFILER_EMPTY` means neither source produced bytes. None of these is DRAM
 - `measured_hbm_bandwidth_bytes_per_s`, `measured_ridge_flops_per_byte` (a copy-kernel estimate does not fill these; see `bandwidth_estimate.json`)
-- `measured_winner` in `dual_plans.csv`
+- `measured_winner` in `dual_plans.csv` (analytical sweeps leave it empty). `bakeoff_decisions.csv` can fill `measured_winner` from a few-shot wall-clock of `always_fuse` versus `always_unfuse`. That column is not DRAM AI and not SCIC accuracy. A busy GPU can flip it
 - MemMode versus ComputeMode kernel time (no such kernel is emitted; `fusion_proxy.csv` does not count)
 - end-to-end tokens/s
 - `quote_as_scic_accuracy` stays false for profiler memory, for `NSIGHT_DRAM_PROCESS_SUM`, and for every bakeoff row
