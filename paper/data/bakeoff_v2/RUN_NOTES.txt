@@ -1,0 +1,19 @@
+Branch: cursor/bakeoff-numbers-attention-fix-0187
+Commit: cb3992f
+Command: CUDA_VISIBLE_DEVICES=1 SKIP_INSTALL=1 bash scripts/run_baseline_bakeoff.sh
+Installed this checkout with pip install -e . before running.
+Attention and max-autotune enabled; Dynamo cache_size_limit=64.
+Selfcheck passed; 77/77 latency rows ok; 12 decisions.
+No Dynamo cache_size_limit-hit warning in run.log.
+
+Validated attention fix:
+prefill_s512: scic_selected=always_fuse=0.02468800079 ms; always_unfuse=0.1151360013 ms.
+prefill_s2048: scic_selected=always_fuse=0.1136640012 ms; always_unfuse=0.1985919997 ms.
+SCIC-selected medians are copied from the chosen baseline, not separate dispatch measurements.
+
+GPU selection and limitations:
+Six pre-run samples did not find an idle GPU. Physical GPU 1 had lower average sampled utilization and was selected.
+At script startup GPU 1 utilization was 92%, with 13490 MiB allocated by other workloads. This was not an idle-GPU measurement.
+Concurrent workload can affect latencies. See gpu_selection.json, nvidia_smi.txt and run.log.
+Some max-autotune candidates exceeded A40 shared-memory limits and were rejected. All final CSV rows are ok.
+Graphs were not inspected. Nsight was not run; these results do not establish measured SCIC accuracy.

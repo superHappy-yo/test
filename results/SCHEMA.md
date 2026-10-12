@@ -36,7 +36,7 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | `bandwidth_estimate.json` | optional copy-kernel estimate from `scripts/bandwidth_probe.sh`. Status `ESTIMATE_COPY_NOT_NSIGHT`. Not a measured ridge |
 | `SEND_BACK.txt` | checklist of what to return |
 | `bakeoff_latency.csv` | from `python -m shapefuse bakeoff` or `scripts/run_baseline_bakeoff.sh`. Columns include `baseline`, `shape`, `median_ms`, `speedup_vs_eager`, `honesty`. No Nsight. `quote_as_scic_accuracy` is false. `sdpa` is not FlashAttention-3. `scic_selected` copies another row's median |
-| `bakeoff_decisions.csv` | SCIC regime, MemMode or ComputeMode, `epilogue_policy`, and `selected_baseline`. GEMM uses `always_fuse` or `always_unfuse`. Library attention scores `compile_sdpa_chain` and times `always_fuse`. The archive `paper/data/bakeoff/` is the pre-fix selector |
+| `bakeoff_decisions.csv` | SCIC regime, MemMode or ComputeMode, `epilogue_policy`, and `selected_baseline`. GEMM uses `always_fuse` or `always_unfuse`. Library attention scores `compile_sdpa_chain` and times `always_fuse`. `paper/data/bakeoff/` is the pre-fix selector. `paper/data/bakeoff_v2/` is the post-fix wall-clock on a busy GPU. Ridge and compute GEMM still select `always_unfuse`; a calibrated selector is TODO |
 | `bakeoff_summary.json` | `BAKEOFF_WALLCLOCK` on CUDA, `PLACEHOLDER_NO_GPU` otherwise. `nsight_used` is false |
 
 ## Fields that stay empty until a human measures them

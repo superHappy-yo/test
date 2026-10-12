@@ -1,6 +1,6 @@
 # 中文提纲：按 shape 分类算子强度，并做双计划融合
 
-对应英文草稿 `paper/draft.md`。这是提纲，不是译文。解析数字与 `shapefuse` 的闭式模型一致。已有的设备数字来自第三次 A40 上传，归档在 `paper/data/a40/`（`--machine A40_FP16`，`PARTIAL_VENDOR_MATMUL`）。`TRY_NSIGHT=1` 时 `ncu` 在 PATH 上，但因 `ERR_NVGPUCTRPERM` 失败，`achieved_ai` 仍为空。`proxy_ai` 是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，不能当 SCIC 准确率。`fusion_proxy.csv` 的时间比不是融合加速。copy 带宽是 `ESTIMATE_COPY_NOT_NSIGHT`，不是实测 ridge。Docker 墙钟 bakeoff 已归档在 `paper/data/bakeoff/`（`BAKEOFF_WALLCLOCK`，Nsight 关闭），数字写在 §7。那份归档是 Attention epilogue 修复之前的选择器。请在空闲 GPU 上重跑 bakeoff，再引用 `compile_sdpa_chain`。没有的测量保持 TBD。不要用数据手册、CPU 代理、`proxy_ai`、copy 估计，或 CSV 里没有的格子填数字。
+对应英文草稿 `paper/draft.md`。这是提纲，不是译文。解析数字与 `shapefuse` 的闭式模型一致。已有的设备数字来自第三次 A40 上传，归档在 `paper/data/a40/`（`--machine A40_FP16`，`PARTIAL_VENDOR_MATMUL`）。`TRY_NSIGHT=1` 时 `ncu` 在 PATH 上，但因 `ERR_NVGPUCTRPERM` 失败，`achieved_ai` 仍为空。`proxy_ai` 是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，不能当 SCIC 准确率。`fusion_proxy.csv` 的时间比不是融合加速。copy 带宽是 `ESTIMATE_COPY_NOT_NSIGHT`，不是实测 ridge。Docker 墙钟 bakeoff 有两份归档，数字写在 §7。`paper/data/bakeoff/` 是 Attention epilogue 修复之前的选择器（`BAKEOFF_WALLCLOCK`，Nsight 关闭）。`paper/data/bakeoff_v2/` 是 `compile_sdpa_chain` 之后的第二次运行。第二次也不是空闲 GPU：脚本启动时物理 GPU 1 利用率 92%，其他负载已占用 13490 MiB（`RUN_NOTES.txt`，`gpu_selection.json`，`idle_found` 为 false）。没有的测量保持 TBD。不要用数据手册、CPU 代理、`proxy_ai`、copy 估计，或 CSV 里没有的格子填数字。不要把第一份归档的 `always_fuse` 改标成第二次的 `scic_selected`。GEMM 的 ComputeMode 仍选 `always_unfuse`，不要写成这次已经改了。
 
 ## 题目（暂定）
 
@@ -16,7 +16,7 @@
 - **明确不写进贡献：** Stage-Stream。它是对方用来承载联合调度的机制。本文不实现、不改写、不宣称。
 - **也不写进贡献：** 新的 Attention 算法，也不宣称写了 FlashAttention-3 kernel。IO-aware Attention（FlashAttention 一类）是已有计划。bakeoff 里的 `sdpa` 是 `scaled_dot_product_attention`，不是 FA-3。
 - **也不写进贡献：** 把 `torch.profiler`、缓存分配器差分或进程合计的 Nsight 字节写成 SCIC 准确率。`quote_as_scic_accuracy` 只有孤立 Nsight DRAM 才为真。
-- 本文 artifact 仍没有 MemMode / ComputeMode kernel，没有 tokens/s，没有 Nsight DRAM。第三次 A40 上传有 `torch.matmul` 时延、一份融合代理和一份 copy 带宽估计（§7），状态 `PARTIAL_VENDOR_MATMUL`，`quote_as_scic_accuracy` 为 false。Nsight 被 `ERR_NVGPUCTRPERM` 挡住。Docker bakeoff 计的是 eager 和 `torch.compile` 的墙钟，不是这两套 kernel。归档见 `paper/data/bakeoff/`。Attention 的库 SDPA 策略修复还没有重测。
+- 本文 artifact 仍没有 MemMode / ComputeMode kernel，没有 tokens/s，没有 Nsight DRAM。第三次 A40 上传有 `torch.matmul` 时延、一份融合代理和一份 copy 带宽估计（§7），状态 `PARTIAL_VENDOR_MATMUL`，`quote_as_scic_accuracy` 为 false。Nsight 被 `ERR_NVGPUCTRPERM` 挡住。Docker bakeoff 计的是 eager 和 `torch.compile` 的墙钟，不是这两套 kernel。修复前归档是 `paper/data/bakeoff/`。修复后的墙钟是 `paper/data/bakeoff_v2/`，GPU 不空闲。GEMM 的校准选择器还没做。
 
 ## 1. 问题
 
@@ -157,7 +157,9 @@ H = 4096，I = 14336，FP16。不加载空专家时：
 3. ridge 带内两套都发。AI < R 时主计划是 MemMode，否则是 ComputeMode。`measured_winner` 为空。
 4. Attention 在两种模式下都不物化 score。ComputeMode 的意思是：保持 FA 式 IO、大 tile、不要再把额外 epilogue 融进主循环。解析主计划不变：长 prefill 仍是 ComputeMode，`fuse_epilogue` 仍为 false。
 
-库 SDPA 已经把 score 融进 kernel。bakeoff 的 `always_unfuse` 只是把 RMSNorm 拆成第二段计时，不是在保护 MMA 主循环。A40 归档里 S = 512 和 S = 2048 因此选慢了。可执行策略改为 `compile_sdpa_chain`，计时为 `always_fuse`，ridge 和 compute 也包括在内。GEMM 的 ComputeMode 仍选 `always_unfuse`。`measured_winner` 仍为空。这条修复没有新的时延。请重跑 bakeoff。
+库 SDPA 已经把 score 融进 kernel。bakeoff 的 `always_unfuse` 只是把 RMSNorm 拆成第二段计时，不是在保护 MMA 主循环。修复前的 A40 归档里 S = 512 和 S = 2048 因此选慢了。可执行策略改为 `compile_sdpa_chain`，计时为 `always_fuse`，ridge 和 compute 也包括在内。`paper/data/bakeoff_v2/` 是这条策略的墙钟：五条 Attention 决策都抄 `always_fuse`。`measured_winner` 仍为空。GEMM 的 ComputeMode 仍选 `always_unfuse`。同一次运行里，ridge 和计算侧 GEMM 抄到约 1×，而 `always_fuse`（`torch.compile`）更快。这是纯数据手册 AI、没有测量反馈的限制。策略没有悄悄改掉。
+
+**TODO：** 校准选择器。一次短计时填上 `measured_winner`，或者在 bakeoff 路径是 `torch.compile` 时，ridge / 计算侧 GEMM 偏好 `always_fuse`。没测之前不要改返回值。`PlanCache.record_measured_winner` 仍没有被调用。v2 的 GPU 不空闲。
 
 缓存键：`(kind, dtype, machine, shape 桶)`。桶是 1、2–8、9–32、33–128、129–512、513–2048、2049–8192、8193+。`PlanCache` 可以记下实测赢家，本仓库没有调用它。
 
@@ -173,9 +175,9 @@ H = 4096，I = 14336，FP16。不加载空专家时：
 | Attention score 写不写 | 联合调度可能输给 IO-aware kernel | 两套计划都不写；模式只选 tile 和额外 epilogue |
 | 每个专家同一模板？ | 常见做法 | 按专家分档，一层里可以异构 |
 | Stage-Stream | 对方的机制 | 不用、不声称、不实现 |
-| 本文证据 | | 闭式 AI、决策表，第三次 A40 `torch.matmul` 曲线作动机（§7），以及归档在 `paper/data/bakeoff/` 的 Docker 墙钟 bakeoff。copy 带宽是 `ESTIMATE_COPY_NOT_NSIGHT`。fusion proxy 的时间比不是融合加速。那份 Attention 归档是修复前的选择器。 |
+| 本文证据 | | 闭式 AI、决策表，第三次 A40 `torch.matmul` 曲线作动机（§7），修复前的 Docker bakeoff（`paper/data/bakeoff/`），以及 `compile_sdpa_chain` 之后的第二次 bakeoff（`paper/data/bakeoff_v2/`）。copy 带宽是 `ESTIMATE_COPY_NOT_NSIGHT`。fusion proxy 的时间比不是融合加速。两次都不是空闲 GPU。 |
 
-GEMM 上，访存侧 MemMode 选 `always_fuse`，归档里 M = 1、32、128 比 eager 快。计算侧 ComputeMode 选 `always_unfuse`，和 eager 接近，M = 256 除外（见 §7 的表）。Attention 不同：库 SDPA 已经融合 score，把 ComputeMode 映射成 `always_unfuse` 只会把 RMSNorm 拆出编译链，S = 512 和 S = 2048 更慢。两条路径都是 PyTorch（eager 或 `torch.compile`），不是手写的 MemMode / ComputeMode kernel，也不是 Stage-Stream。修复后的策略是 `compile_sdpa_chain`。请重跑 bakeoff 再引用它。
+GEMM 上，访存侧 MemMode 选 `always_fuse`。两份归档里 M = 1、32、128 都比 eager 快。第二次运行里，计算侧和 ridge 上侧仍选 `always_unfuse`（M ∈ {256, 512, 2048, 4096}），贴近 1×，而 `always_fuse` 是 1.234890808× 到 1.327495649×（§7）。第一份归档只在 M = 256 上把这个缺口写清楚。Attention 不同：库 SDPA 已经融合 score。修复前把 ComputeMode 映射成 `always_unfuse`，S = 512 和 S = 2048 更慢。第二次归档打 `compile_sdpa_chain`，五个 Attention shape 都抄 `always_fuse`。两条路径都是 PyTorch（eager 或 `torch.compile`），不是手写的 MemMode / ComputeMode kernel，也不是 Stage-Stream。GEMM 映射留在数据手册 AI。下一步是校准选择器。
 
 ## 7. 实验：Docker bakeoff，A40 曲线作动机
 
@@ -200,7 +202,7 @@ GEMM 上，访存侧 MemMode 选 `always_fuse`，归档里 M = 1、32、128 比 
 
 SCIC 用请求的数据手册 ridge 给 GEMM 或 IO-aware Attention 分档（`--machine`，默认 `A40_FP16`）。这不是卡上测到的 ridge。GEMM 上 MemMode（`fuse_epilogue`）选 `always_fuse`，ComputeMode 选 `always_unfuse`。ridge 带内两套都记在 `emit_both`。`bakeoff_decisions.csv` 有 regime、mode、`epilogue_policy`、`selected_baseline`。日志里每个 shape 一行：`SCIC op=... -> always_fuse` 或 `always_unfuse`。
 
-Attention 两条路径都不把 score 写回 HBM，都调用库 SDPA。差别只在 RMSNorm 是进 compile 还是单独一段。tile 切换没有单独的 kernel。Stage-Stream 不在路径里。库 SDPA 已经融合 score，所以可执行 epilogue 策略是 `compile_sdpa_chain`（计时为 `always_fuse`），即使解析主计划是 ComputeMode。下面的表是改这条规则之前的归档：Attention 的 `scic_selected` 仍跟着解析的 `fuse_epilogue`。
+Attention 两条路径都不把 score 写回 HBM，都调用库 SDPA。差别只在 RMSNorm 是进 compile 还是单独一段。tile 切换没有单独的 kernel。Stage-Stream 不在路径里。库 SDPA 已经融合 score，所以可执行 epilogue 策略是 `compile_sdpa_chain`（计时为 `always_fuse`），即使解析主计划是 ComputeMode。下面第一张表是改这条规则之前的归档：Attention 的 `scic_selected` 仍跟着解析的 `fuse_epilogue`。后面的 `paper/data/bakeoff_v2/` 是改完之后的墙钟。GEMM 的映射两次一样。
 
 每一行的诚实标签至少包括 `NO_NSIGHT`、`NOT_SCIC_ACCURACY`、`NOT_AN_FA3_KERNEL`、`NOT_STAGE_STREAM`、`NOT_A_CUSTOM_MEM_OR_COMPUTE_KERNEL`、`GRAPH_NOT_INSPECTED`、`REGIME_USES_DATASHEET_RIDGE`。`scic_selected` 还有 `TIMING_COPIED_FROM_always_fuse` 或 `TIMING_COPIED_FROM_always_unfuse`。没跑成的路径 `median_ms` 留空，`ok=false`。不要补数字。Attention 的加速比分母是物化 score 的 eager，标签 `SPEEDUP_VS_EAGER_COMPARES_TO_MATERIALIZED_ATTENTION` 说明这一点。
 
@@ -215,7 +217,9 @@ SKIP_ATTENTION=1 bash scripts/run_baseline_bakeoff.sh
 
 脚本要求 `nvidia-smi` 和 CUDA 版 PyTorch，不下载 wheel，不调用 Nsight。产物在 `results/bakeoff/`。寄回 `SEND_BACK.txt` 里的文件：`bakeoff_latency.csv`、`bakeoff_decisions.csv`、`bakeoff_summary.json`、`nvidia_smi.txt`、`torch_version.txt`。建议空闲 GPU。bakeoff 会把 `torch._dynamo.config.cache_size_limit` 提到 64（可用 `DYNAMO_CACHE_SIZE_LIMIT` 覆盖），因为这次归档打到了默认值 8。提高上限不会检查图。
 
-#### 已寄回的运行（`paper/data/bakeoff/`）
+#### 修复前的运行（`paper/data/bakeoff/`）
+
+下面的表是 `compile_sdpa_chain` 之前的选择器。不要把这个目录里的 `always_fuse` 改标成第二次的 `scic_selected`。
 
 `bakeoff_summary.json`：`BAKEOFF_WALLCLOCK`，`nsight_used=false`，`quote_as_scic_accuracy=false`，`graph_inspected=false`，包版本 `0.3.0`，机器 `A40_FP16`，数据手册 ridge 215.08620689655172，repeats 10，warmup 3。设备 NVIDIA A40，PyTorch 2.5.1+cu121，CUDA 12.1。77 行时延全部 `ok`，12 条决策。`selected_baseline`：`always_fuse` 6，`always_unfuse` 6。`RUN_NOTES.txt` 记录分支 `cursor/docker-baseline-bakeoff-d966`、提交 `81ec1c5`。下表每个数字都是 CSV 格子。`scic_selected` 抄 `timing_copied_from`，不含切换开销。
 
@@ -255,13 +259,51 @@ decode Sk = 128 和 prefill S = 128 是 MemMode，SCIC 抄 `always_fuse`（2.224
 - `scic_selected` 抄所选基线，不含分发或计划切换开销。
 - 没有跑 Nsight。`quote_as_scic_accuracy` 为 false。regime 列是数据手册 ridge。
 
-#### Attention 修复，还没有重测
+#### 第二次运行：`compile_sdpa_chain` 之后（`paper/data/bakeoff_v2/`）
 
-选择器现在给库 Attention 打 `compile_sdpa_chain`，计时为 `always_fuse`，包括解析主计划是 ComputeMode 的 prefill S = 512 和 S = 2048（这张 A40 数据手册）。GEMM 不变。解析模式仍会写出来，那条 ComputeMode 计划的 `fuse_epilogue` 仍是 false。被覆盖的抄写带诚实标签 `LIBRARY_SDPA_EPILOGUE_COMPILE_SDPA_CHAIN` 和 `LIBRARY_SDPA_CHAIN_NOT_ANALYTICAL_PRIMARY`。bakeoff 也会把 Dynamo 的 `cache_size_limit` 提到默认 64。
+这个目录是库 SDPA epilogue 策略的 bakeoff。文件按寄回原样复制，数字没有改。`bakeoff_summary.json` 里仍有生成器写的那句「请重跑」，并把 `paper/data/bakeoff` 称作修复前选择器。那句话是写文件的代码发出的（同一对象的 `still_tbd`）。旁边的 CSV 才是修复后的墙钟。
 
-**请在空闲 GPU 上重跑 `scripts/run_baseline_bakeoff.sh`。** 上面的表是修复前的归档，不是 `compile_sdpa_chain` 的时延。不要把归档里的 `always_fuse` 格子改标成新的 `scic_selected` 测量：那样会跳过忙 GPU、Dynamo 上限，以及一次新的计时。
+`RUN_NOTES.txt`：分支 `cursor/bakeoff-numbers-attention-fix-0187`，提交 `cb3992f`。命令是 `CUDA_VISIBLE_DEVICES=1 SKIP_INSTALL=1 bash scripts/run_baseline_bakeoff.sh`。摘要里的 CLI 是：
 
-填好的 CSV 能支持：每个 shape 选了哪条计划，以及相对 eager / always-fuse / always-unfuse 的墙钟。不能支持：achieved AI、SCIC 准确率、实测 ridge、手写融合 kernel、FlashAttention-3、Stage-Stream。
+```text
+/root/test/shapefuse/__main__.py bakeoff --out /root/test/results/bakeoff --device cuda --require-cuda --machine A40_FP16 --level decode-prefill --skip-plots --attention
+```
+
+`BAKEOFF_WALLCLOCK`，`nsight_used=false`，`quote_as_scic_accuracy=false`，`graph_inspected=false`，包版本 `0.3.0`，机器 `A40_FP16`，数据手册 ridge 215.08620689655172，repeats 10，warmup 3。设备 NVIDIA A40，PyTorch 2.5.1+cu121，CUDA 12.1，Python 3.10.12。77 行全部 `ok`，12 条决策。`selected_baseline`：`always_fuse` 8，`always_unfuse` 4。下表每个数字都是这个目录的 CSV 格子。`scic_selected` 抄 `timing_copied_from`。
+
+**不是空闲 GPU。** `gpu_selection.json` 里 `"gpu": 1`，`"idle_found": false`。跑前采了六次，没有找到空闲设备。`RUN_NOTES.txt`：脚本启动时 GPU 1 利用率 92%，其他负载已占用 13490 MiB。并发会挪这些时延。这次上传没有 `nvidia_smi.txt`、`torch_version.txt`、`run.log`。Dynamo 的 `cache_size_limit` 是 64，`RUN_NOTES.txt` 写 `run.log` 里没有 cache 上限告警。一些 max-autotune 候选超过了 A40 共享内存上限被拒绝。最终 CSV 每一行都是 `ok=true`。图没有检查。没有跑 Nsight。
+
+**Attention + RMSNorm。** 五条决策都抄 `always_fuse`。解析主计划不变，所以 ComputeMode 上 `fuse_epilogue` 仍是 false。被覆盖的抄写带 `LIBRARY_SDPA_EPILOGUE_COMPILE_SDPA_CHAIN`。prefill S = 512 和 S = 2048 还带 `LIBRARY_SDPA_CHAIN_NOT_ANALYTICAL_PRIMARY`，因为解析主计划是 ComputeMode。decode 和 prefill S = 128 不带这条：它们的解析主计划已经是 MemMode。
+
+| label | 档 / 解析主计划 | SCIC 抄了 | eager ms | fuse × | unfuse × | scic × | sdpa × | compile default × |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| prefill_s128 | 访存 / MemMode | always_fuse | 0.2073599994 | 15.57692321 | 6.882634006 | 15.57692321 | 7.499999966 | 15.57692321 |
+| prefill_s512 | ridge / ComputeMode，两套 | always_fuse | 0.1720000058 | 6.966947518 | 1.493885526 | 6.966947518 | 1.562500053 | 6.718750398 |
+| prefill_s2048 | 计算 / ComputeMode | always_fuse | 1.04499197 | 9.193693331 | 5.262004369 | 9.193693331 | 7.448905144 | 9.189812469 |
+| decode_sk128 | 访存 / MemMode | always_fuse | 0.02867200039 | 2.153846208 | 0.9927977776 | 2.153846208 | 1.076923104 | 1.908413251 |
+| decode_sk2048 | 访存 / MemMode | always_fuse | 0.03584000096 | 1.521739137 | 0.9499576291 | 1.521739137 | 0.9876543299 | 1.489361756 |
+
+修复前的失误在这次墙钟上合上了。prefill S = 512 抄 `always_fuse`，0.02468800079 ms（6.966947518×）。同形状 `always_unfuse` 是 0.1151360013 ms（1.493885526×）。prefill S = 2048 抄 `always_fuse`，0.1136640012 ms（9.193693331×）。`always_unfuse` 是 0.1985919997 ms（5.262004369×）。S = 2048 的 `torch_compile_default` 是 0.1137120016 ms（9.189812469×），同一种 compile 的另一次计时。decode 也抄 `always_fuse`，并且快于 `always_unfuse`：Sk = 128 是 0.01331199985 ms（2.153846208×），对照 0.02888000058 ms（0.9927977776×）；Sk = 2048 是 0.02355200052 ms（1.521739137×），对照 0.0377279995 ms（0.9499576291×）。prefill S = 128 抄 0.01331199985 ms，和 `torch_compile_default` 同一个 median。这一行的 eager 分母是 0.2073599994 ms。修复前同一 label 的 eager median 是 0.03276799992 ms，所以 15.57692321× 不能拿去和修复前的 2.452694651× 比。两次是不同的机器状态。eager 分母仍然物化了 score。
+
+**MatMul+RMSNorm，第二次失误。** GEMM 规则没变。M = 1 的 `always_fuse` 是 0.07168000191 ms，SCIC 抄的就是它。
+
+| label | 档 / 解析主计划 | SCIC 抄了 | eager ms | fuse × | unfuse × | scic × | max-autotune × |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| decode_m1 | 访存 / MemMode | always_fuse | 0.08348800242 | 1.164732146 | 1.000191682 | 1.164732146 | 0.4097369612 |
+| decode_m32 | 访存 / MemMode | always_fuse | 0.09291199967 | 1.267627163 | 1.001897835 | 1.267627163 | 0.4519066112 |
+| ridge_m128 | ridge / MemMode，两套 | always_fuse | 0.09583999962 | 1.285407694 | 1.001839787 | 1.285407694 | 0.3391653976 |
+| ridge_m256 | ridge / ComputeMode，两套 | always_unfuse | 0.1585920006 | 1.307134385 | 1.005987998 | 1.005987998 | 0.6851455047 |
+| ridge_m512 | ridge / ComputeMode，两套 | always_unfuse | 0.2304320037 | 1.327495649 | 1.003134367 | 1.003134367 | 0.4087761186 |
+| prefill_m2048 | 计算 / ComputeMode | always_unfuse | 0.8811199963 | 1.245223289 | 1.014703715 | 1.014703715 | 1.047436091 |
+| prefill_m4096 | 计算 / ComputeMode | always_unfuse | 1.622527957 | 1.234890808 | 0.9974916777 | 0.9974916777 | 1.087951901 |
+
+访存侧和 ridge M = 128：SCIC 仍选 `always_fuse`（1.164732146×、1.267627163×、1.285407694×）。max-autotune 在小 M 上更慢（M = 1 为 0.4097369612×）。失误是另外四个 shape。解析 AI 把 M = 256 和 M = 512 放在 ridge 带、脊点之上（主计划 ComputeMode，`emit_both`），把 M = 2048 和 M = 4096 放在计算侧，于是抄了 `always_unfuse`：1.005987998×、1.003134367×、1.014703715×、0.9974916777×。同形状的 `always_fuse` 是 1.307134385×、1.327495649×、1.245223289×、1.234890808×。另一次 `torch_compile_default` 方向一致：1.310937741×、1.325174806×、1.248866091×、1.243339321×。修复前只在 M = 256 上把缺口写清楚（1.222222167× 对 1.007042204×），M = 512、2048、4096 上 fuse 和 unfuse 都贴近 1×。这一次不是。matmul 加 RMSNorm 的 `torch.compile` 在解析计算侧仍然更快。
+
+这是纯数据手册 AI、没有测量反馈的限制。标签说计算受限，选择器就拒绝 epilogue。bakeoff 的 `always_fuse` 是 `torch.compile`，不是会挤占 MMA 主循环的手写 kernel。在这张忙卡上，compile 相对 eager 仍大约快 1.23× 到 1.33×，抄到的路径贴近 1×。这不是 SCIC 准确率，不是实测 ridge，也不能据此改 regime 的名字。GEMM 策略在本稿里没有改。
+
+**TODO：** 校准选择器。一种做法是一次短计时，填上 `measured_winner`。另一种是 bakeoff 路径为 `torch.compile` 时，ridge 和计算侧 GEMM 偏好 `always_fuse`。没测之前两种都不要上。`PlanCache.record_measured_winner` 仍没有被调用。空闲 GPU 再跑一次仍然有用，因为这张卡利用率是 92%，但它替代不了缺掉的反馈。
+
+两份归档里填好的 CSV 能支持：每个 shape 选了哪条计划，以及相对 eager / always-fuse / always-unfuse 的墙钟。不能支持：achieved AI、SCIC 准确率、实测 ridge、手写融合 kernel、FlashAttention-3、Stage-Stream，也不能支持空闲 GPU 的时延。
 
 A40 的 `torch.matmul` 曲线留在下面，只作「吞吐随 M 变」的动机，不是这次 bakeoff。
 
@@ -363,8 +405,9 @@ Docker 的下一轮是本节开头的 `scripts/run_baseline_bakeoff.sh`，不调
 | Nsight DRAM 字节、achieved AI | TBD。不在 Docker bakeoff 里。`nsight_status=TBD_RUN_PROFILER`。第三次 `TRY_NSIGHT=1` 且 `ncu` 在 PATH 上，失败码 `ERR_NVGPUCTRPERM`。若以后要字节：`docs/NSIGHT_PERMISSIONS.md`，重启，再 `TRY_NSIGHT=1`。这不是测得 0 |
 | 机器实测 ridge | TBD。copy 探针的状态是 `ESTIMATE_COPY_NOT_NSIGHT`，不是这一行 |
 | SCIC 对孤立 Nsight AI 的准确率 | TBD。归档 `agreement.json` 是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，一致率 0.2857142857142857，`quote_as_scic_accuracy` 为 false |
-| Docker bakeoff：eager、`torch.compile` 默认、max-autotune、SDPA、always-fuse、always-unfuse、SCIC 所选路径 | 已归档，§7，`paper/data/bakeoff/`，`BAKEOFF_WALLCLOCK`。修复前的 Attention 选择器。无 Nsight。不是自定义 kernel。不是 FA-3。`quote_as_scic_accuracy` 为 false。GPU 不空闲。Dynamo cache 上限是 8 |
-| `compile_sdpa_chain` 之后的重跑（库 SDPA 的 epilogue 偏好 `always_fuse`） | **请重跑**。还没测。要空闲 GPU。`DYNAMO_CACHE_SIZE_LIMIT` 默认 64 |
+| Docker bakeoff，修复前的 Attention 选择器 | 已归档，§7，`paper/data/bakeoff/`，`BAKEOFF_WALLCLOCK`。无 Nsight。不是自定义 kernel。不是 FA-3。`quote_as_scic_accuracy` 为 false。GPU 不空闲（启动时 83% 和 77%）。Dynamo cache 上限是 8 |
+| `compile_sdpa_chain` 之后的第二次 bakeoff | 已归档，§7，`paper/data/bakeoff_v2/`。五条 Attention 都抄 `always_fuse`。GEMM 在 ridge M ∈ {256, 512} 和 prefill M ∈ {2048, 4096} 仍抄 `always_unfuse`，而 `always_fuse` 更快。不是空闲 GPU（GPU 1 为 92%，13490 MiB）。Dynamo cache 上限 64，没有记下 cache 上限告警。不是 SCIC 准确率 |
+| 校准后的 GEMM 选择器（一次短计时，或在 `torch.compile` 路径上让 ridge / 计算侧 GEMM 偏好 `always_fuse`） | **TODO**。还没实现。没测之前不要改 GEMM 的返回值 |
 | 手写 MemMode / ComputeMode kernel | TBD。bakeoff 不生成它们 |
 | 短 S 与长 S 的 Attention：库 SDPA 加或不加进 compile 的 epilogue | bakeoff 的 Attention 行。median TBD。不是 FA-3 |
 | MoE 倾斜与空专家权重 | TBD |
@@ -391,14 +434,15 @@ Docker 的下一轮是本节开头的 `scripts/run_baseline_bakeoff.sh`，不调
 - 双计划没有寄存器 spill 模型。ComputeMode 拒绝融合，是对照 Self-Attn 反例的政策，不是 spill 代价。AI × spill × SMEM 的联合代价是后续工作，本文不声称已经做了。
 - 没有 MemMode / ComputeMode kernel，没有 tokens/s。§7 的第三次 A40 数字是 `torch.matmul` 的时延和 TFLOP/s，加上不能当成融合加速的 fusion proxy，以及 copy 估计（`ESTIMATE_COPY_NOT_NSIGHT`，570.1019392595165 GB/s，估计 ridge 262.5846181025793）。`measured_ridge_flops_per_byte` 为 null。`quote_as_scic_accuracy` 为 false。profiler 一致率 0.2857142857142857 的状态是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，不是 SCIC 准确率。
 - Nsight 被 `ERR_NVGPUCTRPERM` 挡住。`TRY_NSIGHT=1` 时 `ncu` 在 PATH 上，但读不了 GPU 性能计数器（`nsight_error.log`）。`achieved_ai` 仍为空，`nsight_status` 仍是 `TBD_RUN_PROFILER`。管理员步骤在 `docs/NSIGHT_PERMISSIONS.md`；重启后再跑一次 `TRY_NSIGHT=1`。
-- Docker bakeoff 不跑 Nsight。指标是子图墙钟和日志里的计划选择，不能写成 SCIC 准确率。`always_fuse` 是 `torch.compile` 尝试。`always_unfuse` 是 eager（Attention 的 epilogue 分两段计时）。都不是手写的 MemMode / ComputeMode kernel。图没有被检查。归档的 GPU 不空闲（`RUN_NOTES.txt` 启动时 83% 和 77%；`nvidia_smi.txt` 为 81% 和 78%）。Dynamo 的 `cache_size_limit` 是 8。`scic_selected` 抄基线 median。
-- Attention 的可执行策略 `compile_sdpa_chain` 是针对 S = 512 和 S = 2048 失误的修改，不是新的计时。请重跑 bakeoff 再引用。GEMM 的 ComputeMode 仍映射到 `always_unfuse`。M = 256 上这个映射把 1.222222167× 的 compile 留在桌上，抄的是 1.007042204×。
+- Docker bakeoff 不跑 Nsight。指标是子图墙钟和日志里的计划选择，不能写成 SCIC 准确率。`always_fuse` 是 `torch.compile` 尝试。`always_unfuse` 是 eager（Attention 的 epilogue 分两段计时）。都不是手写的 MemMode / ComputeMode kernel。图没有被检查。`scic_selected` 抄基线 median。两份归档的 GPU 都不空闲。修复前 `RUN_NOTES.txt` 启动时是 83% 和 77%，同目录 `nvidia_smi.txt` 是 81% 和 78%。第二次选了物理 GPU 1，利用率 92%，已分配 13490 MiB（`paper/data/bakeoff_v2/RUN_NOTES.txt`，`gpu_selection.json`，`idle_found` 为 false）。修复前 Dynamo 的 `cache_size_limit` 是 8。第二次是 64，没有记下 cache 上限告警。
+- `compile_sdpa_chain` 的墙钟在 `paper/data/bakeoff_v2/`。五条 Attention 都抄 `always_fuse`，包括 prefill S = 512（0.02468800079 ms，6.966947518×）和 S = 2048（0.1136640012 ms，9.193693331×）。这是 `torch.compile` 下的库 SDPA 加 RMSNorm，不是新 kernel，也不是空闲 GPU。
+- GEMM 的 ComputeMode 仍映射到 `always_unfuse`，这是故意留着的。第二次在 M ∈ {256, 512, 2048, 4096} 抄到约 1×，把 `always_fuse` 的 1.307134385×、1.327495649×、1.245223289×、1.234890808× 留在桌上。修复前只在 M = 256 上写清同类缺口（1.222222167× 对 1.007042204×）。纯数据手册 AI 没有测量反馈。校准选择器是 **TODO**。策略没有悄悄改掉。
 - 调用 `scaled_dot_product_attention` 的行是 PyTorch 库算子，不是本文的 FlashAttention-3 kernel。Stage-Stream 不在 bakeoff 里。
 - 这一包的 Triton bias+GELU 行已经跑起来（`ok=true`，`TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`）。它是已经物化矩阵上的逐元素 stub，不是融合 GEMM。
 
 ## 10. 结论句（可直接用）
 
-在 H100 这一档的 Roofline 上，宽度 4096 的 FP16 方阵投影大约在 M\* ≈ 345 换边；同一闭式放到 A40 数据手册（149.7 TFLOP/s，696 GB/s，R = 215.08620689655172）上，M\* = 240.32584259093773，第三次上传的 `summary.json` 和 `crossings.json` 里有这一项。IO-aware Attention 的强度随 S 换边，把 score 写回 HBM 的实现则不会；倾斜的 MoE 一层之内就同时有两种 regime。按算子种类做死的融合跟不上这些穿越。SCIC 把 regime 从 shape 和流量里算出来，双计划把它变成 MemMode、ComputeMode 或两者都要。Stage-Stream 不属于这个设计。设备上目前是 `--machine A40_FP16` 的第三次 `torch.matmul` 曲线，状态 `PARTIAL_VENDOR_MATMUL`：M=1 为 0.4744687645 TFLOP/s，M=4096 为 115.3816693 TFLOP/s，相对 A40 数据手册峰值的比例是 0.7707526341271441，不是实测 ridge。`TRY_NSIGHT=1` 找到了 `ncu`，随后 `ERR_NVGPUCTRPERM`，`achieved_ai` 仍为空（`TBD_RUN_PROFILER`）。`proxy_ai` 是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，卡在 4096。`quote_as_scic_accuracy` 为 false；检查用一致率 0.2857142857142857 的状态是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，不是 SCIC 准确率。copy 估计是 `ESTIMATE_COPY_NOT_NSIGHT`（570.1019392595165 GB/s，估计 ridge 262.5846181025793），`measured_ridge_flops_per_byte` 为 null。fusion proxy 跑过，时间比是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。Triton bias+GELU 是 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION` 且 `ok=true`，这是逐元素 stub，不是融合 GEMM。Docker 上的实验是 bakeoff，归档在 `paper/data/bakeoff/`（`BAKEOFF_WALLCLOCK`，Nsight 关闭）。SCIC 对 GEMM epilogue 的访存侧有帮助（M = 1、32、128）。Attention 需要知道库已经融合了 score：修复前的 ComputeMode 在 prefill S = 512 失误（抄到 1.44456598×，`always_fuse` 为 2.628400711×），在 S = 2048 也失误（抄到 7.167832147×，`always_fuse` 为 9.192825045×）。选择器现在打 `compile_sdpa_chain`。请在空闲 GPU 上重跑 bakeoff，再引用这次修复。归档那次 GPU 不空闲，Dynamo cache 上限是 8，图没有检查，`scic_selected` 抄的是基线。那次运行不宣称 FlashAttention-3，也不把 profiler 写成 SCIC 准确率。融合 kernel、实测 ridge、tokens/s 仍然是 TBD。
+在 H100 这一档的 Roofline 上，宽度 4096 的 FP16 方阵投影大约在 M\* ≈ 345 换边；同一闭式放到 A40 数据手册（149.7 TFLOP/s，696 GB/s，R = 215.08620689655172）上，M\* = 240.32584259093773，第三次上传的 `summary.json` 和 `crossings.json` 里有这一项。IO-aware Attention 的强度随 S 换边，把 score 写回 HBM 的实现则不会；倾斜的 MoE 一层之内就同时有两种 regime。按算子种类做死的融合跟不上这些穿越。SCIC 把 regime 从 shape 和流量里算出来，双计划把它变成 MemMode、ComputeMode 或两者都要。Stage-Stream 不属于这个设计。设备上目前是 `--machine A40_FP16` 的第三次 `torch.matmul` 曲线，状态 `PARTIAL_VENDOR_MATMUL`：M=1 为 0.4744687645 TFLOP/s，M=4096 为 115.3816693 TFLOP/s，相对 A40 数据手册峰值的比例是 0.7707526341271441，不是实测 ridge。`TRY_NSIGHT=1` 找到了 `ncu`，随后 `ERR_NVGPUCTRPERM`，`achieved_ai` 仍为空（`TBD_RUN_PROFILER`）。`proxy_ai` 是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，卡在 4096。`quote_as_scic_accuracy` 为 false；检查用一致率 0.2857142857142857 的状态是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，不是 SCIC 准确率。copy 估计是 `ESTIMATE_COPY_NOT_NSIGHT`（570.1019392595165 GB/s，估计 ridge 262.5846181025793），`measured_ridge_flops_per_byte` 为 null。fusion proxy 跑过，时间比是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。Triton bias+GELU 是 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION` 且 `ok=true`，这是逐元素 stub，不是融合 GEMM。Docker 上的实验是 bakeoff。修复前的归档是 `paper/data/bakeoff/`（`BAKEOFF_WALLCLOCK`，Nsight 关闭）。那一次 Attention 的 ComputeMode 在 prefill S = 512 失误（抄到 1.44456598×，`always_fuse` 为 2.628400711×），在 S = 2048 也失误（抄到 7.167832147×，`always_fuse` 为 9.192825045×）。第二次归档 `paper/data/bakeoff_v2/` 打 `compile_sdpa_chain`，五个 Attention shape 都抄 `always_fuse`。prefill S = 512 是 0.02468800079 ms（6.966947518×），对照 unfuse 的 0.1151360013 ms。prefill S = 2048 是 0.1136640012 ms（9.193693331×），对照 unfuse 的 0.1985919997 ms。decode 也抄 fuse。GEMM 访存侧仍然对上更快的 epilogue（M = 1、32、128：1.164732146×、1.267627163×、1.285407694×）。第二次失误是 ridge 和计算侧 GEMM：SCIC 抄 `always_unfuse`，贴近 1×，而 `always_fuse` 是 1.307134385×、1.327495649×、1.245223289×、1.234890808×。这是没有测量反馈的数据手册 AI。GEMM 策略没有改。下一步是校准选择器。两张 GPU 都在忙。第二次的物理 GPU 1 利用率 92%，已分配 13490 MiB。图没有检查，`scic_selected` 抄的是基线。两次都不宣称 FlashAttention-3，也不把 profiler 写成 SCIC 准确率。融合 kernel、实测 ridge、tokens/s 仍然是 TBD。
 
 ## 11. 图表与文件对照
 
@@ -417,7 +461,8 @@ Docker 的下一轮是本节开头的 `scripts/run_baseline_bakeoff.sh`，不调
 | 融合代理 | `fusion_proxy.csv`（`PROXY_TIMING_NOT_A_FUSION_SPEEDUP`；Triton 行 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`；不是 MemMode / ComputeMode） |
 | Nsight | `nsight_dram.json` 仅 `TRY_NSIGHT=1` 且 `ncu` 成功。这一包是 `nsight_error.log`（`ERR_NVGPUCTRPERM`）和 `nsight_skipped.txt`。管理员步骤：`docs/NSIGHT_PERMISSIONS.md` |
 | copy 估计 | `bandwidth_estimate.json`，`ESTIMATE_COPY_NOT_NSIGHT`，估计 ridge 262.5846181025793，`measured_ridge_flops_per_byte` 为 null |
-| Docker bakeoff | `paper/data/bakeoff/`（`bakeoff_latency.csv`、`bakeoff_decisions.csv`、`bakeoff_summary.json`、`RUN_NOTES.txt`、`nvidia_smi.txt`）。`BAKEOFF_WALLCLOCK`。无 Nsight。修复前的 Attention 选择器。`quote_as_scic_accuracy` 为 false。不是 FA-3。不是 Stage-Stream。`compile_sdpa_chain` 之后要重跑 |
+| Docker bakeoff，修复前 | `paper/data/bakeoff/`（`bakeoff_latency.csv`、`bakeoff_decisions.csv`、`bakeoff_summary.json`、`RUN_NOTES.txt`、`nvidia_smi.txt`）。`BAKEOFF_WALLCLOCK`。无 Nsight。修复前的 Attention 选择器。`quote_as_scic_accuracy` 为 false。不是 FA-3。不是 Stage-Stream |
+| Docker bakeoff，`compile_sdpa_chain` 之后 | `paper/data/bakeoff_v2/`（`bakeoff_latency.csv`、`bakeoff_decisions.csv`、`bakeoff_summary.json`、`RUN_NOTES.txt`、`gpu_selection.json`）。Attention 抄 `always_fuse`。GEMM 的 ComputeMode 仍抄 `always_unfuse`。忙 GPU（所选设备 92%）。不是 SCIC 准确率。GEMM 校准选择器是 TODO |
 
 ## 12. 写作时不要出现的句子
 
@@ -434,6 +479,7 @@ Docker 的下一轮是本节开头的 `scripts/run_baseline_bakeoff.sh`，不调
 - 把上一包 Triton 的 `NameError('tl is not defined')` 写成这一包的结果。这一包七行 `ok=true`，但时间比仍不是融合加速。
 - 把 bakeoff 的 `sdpa` 行写成 FlashAttention-3 kernel。它是 `scaled_dot_product_attention`。
 - 把 bakeoff 的 `always_fuse` / `always_unfuse` 写成手写的 MemMode / ComputeMode kernel。它们是 `torch.compile` 或 eager。
-- 写出 `paper/data/bakeoff/` 的 CSV 里没有的 median 或加速比。修复后的 `scic_selected` 还没有新测量，不要用归档的 `always_fuse` 冒充。
+- 写出 `paper/data/bakeoff/` 或 `paper/data/bakeoff_v2/` 的 CSV 里没有的 median 或加速比。不要把第一份归档的 `always_fuse` 改标成第二次的 `scic_selected`。
 - 把 bakeoff 写成 Nsight 实验或 SCIC 准确率。`NO_NSIGHT` 和 `quote_as_scic_accuracy=false` 必须留着。
-- 把这次归档写成空闲 GPU，或写成每个 compile 行都已确认跑了编译后的代码。`RUN_NOTES.txt` 写的是忙卡和 `cache_size_limit=8`，`graph_inspected` 为 false。
+- 把这两份归档写成空闲 GPU，或写成每个 compile 行都已确认跑了编译后的代码。修复前的 `RUN_NOTES.txt` 是忙卡和 `cache_size_limit=8`。第二次是 GPU 1 利用率 92%、已分配 13490 MiB，`idle_found` 为 false，`cache_size_limit=64`，`graph_inspected` 为 false。
+- 把第二次的 GEMM 计算侧写成已经改选 `always_fuse`。SCIC 抄的是 `always_unfuse`。更快的 compile 是限制，校准选择器是 TODO，不是已经改掉的策略。

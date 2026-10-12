@@ -15,9 +15,16 @@ FlashAttention-3 kernel written for this paper. Stage-Stream is not selected.
 
 Library SDPA already fuses scores. The attention executable path is
 therefore ``compile_sdpa_chain``, timed as ``always_fuse``, even when the
-analytical primary is ComputeMode. GEMM still maps ComputeMode to
-``always_unfuse``. The attention change needs a new bakeoff before its
-latency is quoted.
+analytical primary is ComputeMode. The wall-clock for that choice is
+``paper/data/bakeoff_v2/`` (not an idle GPU). GEMM still maps ComputeMode
+to ``always_unfuse``.
+
+TODO (calibrated selector, not implemented): on that second bakeoff the
+ridge and compute GEMMs copy ``always_unfuse`` near 1× versus eager while
+``always_fuse`` (``torch.compile``) is faster. Datasheet AI has no
+measurement feedback. Do not flip the GEMM return without a test. Prefer
+one-shot timing, or prefer ``always_fuse`` for those GEMMs when the
+bakeoff path is ``torch.compile``.
 """
 
 from __future__ import annotations
@@ -83,8 +90,8 @@ HONESTY_SCIC_COPIED = "SCIC_SELECTED_EXISTING_PATH_TIMING_COPIED"
 HONESTY_SCIC_MISSING = "SCIC_SELECTED_PATH_DID_NOT_RUN"
 HONESTY_RIDGE_PRIMARY_ONLY = "RIDGE_BAND_EMIT_BOTH_TIMED_PRIMARY_ONLY"
 HONESTY_ATTN_NO_TILE_KERNEL = "TILE_SWITCH_NOT_A_SEPARATE_KERNEL"
-# Library SDPA epilogue. Not a claim that the graph fused, and not a
-# re-measured latency until the bakeoff is run again.
+# Library SDPA epilogue. Not a claim that the graph fused.
+# paper/data/bakeoff_v2 is the wall-clock. That GPU was not idle.
 HONESTY_LIBRARY_SDPA_CHAIN = "LIBRARY_SDPA_EPILOGUE_COMPILE_SDPA_CHAIN"
 HONESTY_LIBRARY_SDPA_NOT_PRIMARY = "LIBRARY_SDPA_CHAIN_NOT_ANALYTICAL_PRIMARY"
 
@@ -99,11 +106,16 @@ def select_executable_path(decision: PlanDecision) -> str:
 
     Attention that calls library SDPA does not follow ComputeMode into
     ``always_unfuse``. SDPA already keeps scores off HBM. The unfuse path
-    only splits RMSNorm off that kernel, and the archived A40 wall-clock
-    was slower there at prefill S=512 and S=2048. The executable policy is
-    :data:`POLICY_COMPILE_SDPA_CHAIN`, timed as ``always_fuse``, in every
-    attention regime. The analytical primary mode is unchanged. This
-    default has not been re-measured.
+    only splits RMSNorm off that kernel. The pre-fix archive
+    (``paper/data/bakeoff``) was slower there at prefill S=512 and S=2048.
+    The executable policy is :data:`POLICY_COMPILE_SDPA_CHAIN`, timed as
+    ``always_fuse``, in every attention regime. ``paper/data/bakeoff_v2``
+    measured that choice. The analytical primary mode is unchanged.
+
+    GEMM is intentionally unchanged. TODO: calibrate ridge and compute
+    GEMM instead of mapping ComputeMode straight to ``always_unfuse``.
+    The v2 CSV shows ``torch.compile`` still faster on those shapes, and
+    the v2 GPU was not idle. Do not change the return below without a test.
     """
     if decision.kind in ATTENTION_KINDS and decision.primary.materialize_intermediate:
         raise RuntimeError(
@@ -115,6 +127,8 @@ def select_executable_path(decision: PlanDecision) -> str:
                 f"unknown attention epilogue policy {decision.epilogue_policy!r}"
             )
         return BASELINE_ALWAYS_FUSE
+    # GEMM policy stays analytical. TODO: calibrated selector for ridge and
+    # compute GEMM when the bakeoff path is torch.compile (see bakeoff_v2).
     if decision.primary.fuse_epilogue:
         return BASELINE_ALWAYS_FUSE
     return BASELINE_ALWAYS_UNFUSE

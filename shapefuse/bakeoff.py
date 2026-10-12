@@ -21,8 +21,9 @@ What each baseline actually is:
 - ``scic_selected``: copies the median of ``always_fuse`` or
   ``always_unfuse`` according to :func:`select_executable_path`. It is
   not a third kernel. Attention copies ``always_fuse``
-  (``compile_sdpa_chain``) in every regime. That override is not a
-  re-measured latency until the bakeoff is run again.
+  (``compile_sdpa_chain``) in every regime. ``paper/data/bakeoff_v2``
+  is that wall-clock. The GPU was not idle. GEMM ComputeMode still
+  copies ``always_unfuse``; calibrating that choice is TODO.
 
 ``quote_as_scic_accuracy`` is false. Profiler bytes are not read.
 Stage-Stream is not involved.
@@ -1105,9 +1106,10 @@ def _summary(
             "always_fuse and always_unfuse are not custom MemMode or ComputeMode kernels. "
             "The regime column uses the requested datasheet ridge. "
             "Library attention scores compile_sdpa_chain (always_fuse) for the "
-            "epilogue, including in ridge and compute. Re-run the bakeoff before "
-            "quoting a latency for that policy. The archive in paper/data/bakeoff "
-            "is the pre-fix selector."
+            "epilogue, including in ridge and compute. paper/data/bakeoff is the "
+            "pre-fix selector. paper/data/bakeoff_v2 is the post-fix wall-clock "
+            "on a busy GPU. GEMM ComputeMode still selects always_unfuse; a "
+            "calibrated selector for ridge and compute GEMM is not implemented."
         ),
         "machine": machine.name,
         "ridge_flops_per_byte": machine.ridge,
@@ -1140,8 +1142,11 @@ def _summary(
             "A measured ridge on this GPU",
             "End-to-end tokens/s",
             "Plan-switch overhead on a serving trace",
-            "A re-bakeoff of the library-SDPA epilogue policy (compile_sdpa_chain). "
-            "paper/data/bakeoff is the pre-fix selector",
+            "A calibrated GEMM selector. Datasheet ComputeMode still maps to "
+            "always_unfuse. paper/data/bakeoff_v2 shows torch.compile faster on "
+            "ridge and compute GEMM. Not implemented",
+            "paper/data/bakeoff is the pre-fix attention selector. "
+            "paper/data/bakeoff_v2 is the compile_sdpa_chain wall-clock on a busy GPU",
         ],
         "repro": {
             "python": sys.version.split()[0],

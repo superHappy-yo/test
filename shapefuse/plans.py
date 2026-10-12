@@ -151,11 +151,12 @@ def select_plan(report: IntensityReport, *, length: int | None = None) -> PlanDe
         # a custom mainloop would also absorb a heavy epilogue). The bakeoff
         # cannot emit that mainloop. Both of its attention paths call library
         # SDPA, which already keeps scores off HBM. ``always_unfuse`` only
-        # splits RMSNorm into a second timed region. The A40 wall-clock
-        # (paper/data/bakeoff) showed that split loses at prefill S=512 and
-        # S=2048. Score compile_sdpa_chain, timed as always_fuse, in every
-        # attention regime, including ridge and compute. A re-bakeoff is
-        # required before quoting a latency for this policy.
+        # splits RMSNorm into a second timed region. The pre-fix A40
+        # wall-clock (paper/data/bakeoff) lost at prefill S=512 and S=2048.
+        # Score compile_sdpa_chain, timed as always_fuse, in every attention
+        # regime, including ridge and compute. paper/data/bakeoff_v2 is that
+        # wall-clock. The GPU was not idle. GEMM ComputeMode still selects
+        # always_unfuse; a calibrated GEMM selector is TODO and is not applied.
         epilogue_policy = POLICY_COMPILE_SDPA_CHAIN
         why += (
             " Scores stay off HBM in both plans. Tile size and extra epilogue "
@@ -165,7 +166,8 @@ def select_plan(report: IntensityReport, *, length: int | None = None) -> PlanDe
             f"policy is {POLICY_COMPILE_SDPA_CHAIN} (timed as always_fuse), "
             "including when the analytical primary is ComputeMode. "
             "always_unfuse only splits RMSNorm off that library kernel. "
-            "Re-run the bakeoff before quoting latency for this policy."
+            "paper/data/bakeoff_v2 records the wall-clock for this policy. "
+            "That GPU was not idle."
         )
     elif kind == "moe_grouped":
         why += " Grouped-GEMM aggregate only; split experts with moe_expert rows."

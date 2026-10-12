@@ -11,6 +11,6 @@ This directory is the upload from `scripts/run_baseline_bakeoff.sh` on the branc
 
 `scic_selected` copies `timing_copied_from`. It does not include plan-switch overhead.
 
-This run used the pre-fix attention rule: analytical ComputeMode selected `always_unfuse`. That misses `prefill_s512` and `prefill_s2048`, where `always_fuse` is faster. The code change that scores `compile_sdpa_chain` (timed as `always_fuse`) for library SDPA is **not** what these rows measured. Please re-run the bakeoff on an idle GPU before quoting the fixed selector.
+This run used the pre-fix attention rule: analytical ComputeMode selected `always_unfuse`. That misses `prefill_s512` and `prefill_s2048`, where `always_fuse` is faster. The post-fix wall-clock is `paper/data/bakeoff_v2/`. Do not relabel a cell in this directory as that later `scic_selected` measurement. The second run was also not an idle GPU.
 
 `RUN_NOTES.txt` records a busy GPU (83% and 77% utilization at script start) and Dynamo `cache_size_limit=8`. `nvidia_smi.txt` is the snapshot saved with the upload (GPU 0 at 81%, GPU 1 at 78%).
