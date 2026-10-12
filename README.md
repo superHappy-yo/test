@@ -31,7 +31,7 @@ scripts/run_a40.sh    A40 datasheet anchor, matmul sweep, profiler proxy, fusion
 scripts/nsight_dram.sh  optional ncu capture; strongly recommended via TRY_NSIGHT=1
 scripts/bandwidth_probe.sh  copy-kernel GDDR estimate; ESTIMATE_COPY_NOT_NSIGHT, not a measured ridge
 docs/NSIGHT_PERMISSIONS.md  fix ERR_NVGPUCTRPERM, then TRY_NSIGHT=1 again
-paper/draft.md        English MLSys/ASPLOS-style draft, with TBD markers
+paper/jsa/main.tex    JSA submission (elsarticle). paper/draft.md is the short companion
 paper/zh_outline.md   Chinese outline
 notes/draft_report_zh.md
 results/SCHEMA.md     output contract; generated files are gitignored

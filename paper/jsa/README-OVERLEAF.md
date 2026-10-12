@@ -1,54 +1,67 @@
-# Overleaf upload: Journal of Systems Architecture (Elsevier)
+# Journal of Systems Architecture manuscript
 
-This folder is an **Overleaf-ready** LaTeX project for *Journal of Systems Architecture* (JSA), converted from `paper/draft.md` on the shapefuse repository branch.
+This directory is the submission source. It is an Elsevier `elsarticle` preprint for *Journal of Systems Architecture*.
 
-## What is included
+| File | Role |
+| --- | --- |
+| `main.tex` | Manuscript: abstract, highlights, keywords, sections, tables |
+| `references.bib` | Numbered bibliography (`elsarticle-num`). Real venues and arXiv ids; no fabricated DOIs |
+| `figures/` | PDF and PNG figures plotted from `paper/data/bakeoff_v4/` and `paper/data/a40/` |
+| `scripts/plot_jsa_figures.py` | Regenerates those figures. Not required to compile the paper |
 
-| File | Purpose |
-|------|---------|
-| `main.tex` | `elsarticle` manuscript (`preprint`, 12pt), abstract, Elsevier highlights, keywords, sections |
-| `references.bib` | Citations referenced in the draft (no fabricated DOIs) |
-| `figures/fig_a40_torch_matmul_tflops.png` | A40 matmul motivation figure from the draft |
-| `README-OVERLEAF.md` | This file |
+`elsarticle` is provided by the TeX installation (Overleaf includes it). It is not vendored here.
 
-`elsarticle` is **not** vendored; Overleaf provides it via the Elsevier template.
+## Figures
 
-## Upload to Overleaf
+- `fig_roofline_gemm` — A40 datasheet Roofline and the closed-form GEMM intensity curve, with bakeoff decisions marked
+- `fig_a40_torch_matmul_tflops` — stock `torch.matmul` TFLOP/s versus \(M\)
+- `fig_gemm_plan_speedup` — fuse, unfuse, compile, and the selected GEMM path
+- `fig_attn_library_paths` — library attention latency and speedup versus materialized eager
+- `fig_oracle_gap` — selected latency divided by the faster of fuse and unfuse
 
-1. Download **`paper/jsa-overleaf.zip`** from the repository (or use `artifacts/jsa-overleaf.zip`).
-2. In [Overleaf](https://www.overleaf.com), **New Project → Upload Project**.
-3. Select the zip file. The project root should contain `main.tex`, `references.bib`, `figures/`, and this README **flat** at the top level (no extra nesting required).
+## Regenerate the figures
+
+From the repository root, with the package importable (`pip install -e .` if needed) and `matplotlib` installed:
+
+```bash
+python paper/jsa/scripts/plot_jsa_figures.py
+```
+
+The script reads only archived CSVs and JSON under `paper/data/`. It does not run a GPU benchmark.
 
 ## Compile
 
-- **Engine:** pdfLaTeX (default) or **latexmk** (`latexmk -pdf main.tex`).
-- **Bibliography:** `elsarticle-num` (numbered citations).
-- Run pdfLaTeX → BibTeX → pdfLaTeX ×2 if references show as `?`.
-
-## Journal metadata
-
-- Document class: `\documentclass[preprint,12pt]{elsarticle}`
-- Journal line: `\journal{Journal of Systems Architecture}`
-
-For final submission, switch from `preprint` to the option required by Elsevier (often `review` or `final`; check the JSA author guide).
-
-## What you should edit before submission
-
-1. **Authors and affiliations** — placeholder `Happy Super` / `Affiliation TBD` in `main.tex`; replace email and `\affiliation{...}`.
-2. **Highlights** — five bullets in `\begin{highlights}...\end{highlights}`; tune for the camera-ready contribution list if needed.
-3. **Abstract and keywords** — align with your final JSA systems-architecture framing.
-4. **Figures** — additional analytical figures from the repo (`fig_gemm_ai_vs_M.png`, etc.) are **not** copied here; add them under `figures/` and uncomment/add `\includegraphics` as needed.
-5. **TBD claims** — the draft intentionally leaves Nsight DRAM, tokens/s, and custom kernels as future work; do not fill those from datasheet math or profiler proxies.
-
-## Source of truth
-
-English content and numbers follow `paper/draft.md` and archived CSVs under `paper/data/` (especially `bakeoff_v4/` for calibrated latency). `paper/zh_outline.md` is reference only.
-
-## Packaging script (maintainers)
-
-From repo root:
+Engine: pdfLaTeX.
 
 ```bash
-(cd paper/jsa && zip -r ../jsa-overleaf.zip . -x '*.DS_Store')
-cp paper/jsa-overleaf.zip artifacts/jsa-overleaf.zip
+cd paper/jsa
+pdflatex main.tex
+bibtex main
+pdflatex main.tex
+pdflatex main.tex
 ```
+
+Or `latexmk -pdf main.tex`.
+
+Document class: `\documentclass[preprint,12pt]{elsarticle}`.
+Journal line: `\journal{Journal of Systems Architecture}`.
+
+For a review or camera-ready upload, switch the class option as the JSA guide requires (`review` or `final`).
+
+## Edit before submission
+
+1. Author and affiliation in `main.tex`. The placeholder is Happy Super, affiliation TBD, `happy.super@example.com`.
+2. Highlights, if the camera-ready contribution list changes. Each bullet is kept under the Elsevier 85-character guidance.
+3. Do not fill Nsight DRAM bytes, achieved arithmetic intensity, custom MemMode or ComputeMode kernels, or end-to-end tokens/s. Those measurements are not in the archive. `quote_as_scic_accuracy` stays false.
+
+## Optional zip
+
+A flat archive for an Overleaf upload can be rebuilt from this directory:
+
+```bash
+cd paper/jsa
+zip -r ../jsa-overleaf.zip main.tex references.bib README-OVERLEAF.md figures -x '*.DS_Store'
+cp ../jsa-overleaf.zip ../../artifacts/jsa-overleaf.zip
+```
+
+The Git tree is the source of truth. The zip is only a convenience copy of the same files.
