@@ -1,5 +1,7 @@
 # Shape-adaptive operator fusion (SCIC + dual-plan)
 
+**`main` is the single source of truth.** JSA submission LaTeX: [`paper/jsa/main.tex`](paper/jsa/main.tex).
+
 Operator intensity is shape-dependent. The same GEMM, attention block, or MoE grouped GEMM crosses a GPU's Roofline ridge as the shape changes, so a fusion compiler has to emit more than one plan.
 
 This repository is the analytical model and the experiment harness for that claim:
