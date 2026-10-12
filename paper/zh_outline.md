@@ -1,6 +1,6 @@
 # 中文提纲：按 shape 分类算子强度，并做双计划融合
 
-对应英文草稿 `paper/draft.md`。这是提纲，不是译文。解析数字与 `shapefuse` 的闭式模型一致。已有的设备数字来自第二次 A40 上传，归档在 `paper/data/a40/`（`--machine A40_FP16`，`PARTIAL_VENDOR_MATMUL`）。没有 Nsight。`fusion_proxy.csv` 的时间比不是融合加速。没有的测量保持 TBD，不要用数据手册、CPU 代理或 `proxy_ai` 填上。
+对应英文草稿 `paper/draft.md`。这是提纲，不是译文。解析数字与 `shapefuse` 的闭式模型一致。已有的设备数字来自第三次 A40 上传，归档在 `paper/data/a40/`（`--machine A40_FP16`，`PARTIAL_VENDOR_MATMUL`）。`TRY_NSIGHT=1` 时 `ncu` 在 PATH 上，但因 `ERR_NVGPUCTRPERM` 失败，`achieved_ai` 仍为空。`proxy_ai` 是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，不能当 SCIC 准确率。`fusion_proxy.csv` 的时间比不是融合加速。copy 带宽是 `ESTIMATE_COPY_NOT_NSIGHT`，不是实测 ridge。没有的测量保持 TBD，不要用数据手册、CPU 代理、`proxy_ai` 或 copy 估计填上。
 
 ## 题目（暂定）
 
@@ -15,7 +15,7 @@
 - 相对 ComFuse：他们做 MatMul + epilogue 的联合融合。我们加的是 SCIC（编译期可查询的强度分类）和双计划切换。
 - **明确不写进贡献：** Stage-Stream。它是对方用来承载联合调度的机制。本文不实现、不改写、不宣称。
 - **也不写进贡献：** 新的 Attention 算法。IO-aware Attention（FlashAttention 一类）是已有计划，不是本文的结果。
-- 本文 artifact 仍没有 MemMode / ComputeMode kernel，没有 tokens/s，没有 Nsight。第二次 A40 上传有 `torch.matmul` 时延和一份融合代理（§7），状态 `PARTIAL_VENDOR_MATMUL`，`quote_as_scic_accuracy` 为 false。
+- 本文 artifact 仍没有 MemMode / ComputeMode kernel，没有 tokens/s，没有 Nsight DRAM。第三次 A40 上传有 `torch.matmul` 时延、一份融合代理和一份 copy 带宽估计（§7），状态 `PARTIAL_VENDOR_MATMUL`，`quote_as_scic_accuracy` 为 false。Nsight 被 `ERR_NVGPUCTRPERM` 挡住。
 
 ## 1. 问题
 
@@ -50,7 +50,7 @@
 - \(M^\star = Rd/(d-2R)\)。d = 4096、H100 FP16：**M\* ≈ 344.9**。
 - 同一条曲线的三档边界：M ≈ 159 以下 memory，M ≈ 830 以上 compute。
 - A100 的 M\* ≈ 165。
-- A40 数据手册：M(0.5R) = 113.50330752177987，M\* = 240.32584259093773，M(2R) = 544.5531470469126，R = 215.08620689655172。第二次上传的 `crossings.json` 用 `--machine A40_FP16`，里面有 `A40_FP16` 这一项。这是数据手册闭式，不是卡上测到的 ridge。
+- A40 数据手册：M(0.5R) = 113.50330752177987，M\* = 240.32584259093773，M(2R) = 544.5531470469126，R = 215.08620689655172。第三次上传的 `summary.json` 和与之相同的 `crossings.json` 用 `--machine A40_FP16`，里面有 `A40_FP16` 这一项。这是数据手册闭式，不是卡上测到的 ridge。
 - FP8 把峰值和 AI 一起大约翻倍，M\* 几乎不动（≈ 345.2）。只量化权重、峰值仍按 FP16 时，AI 会升高，但 M = 1 的 W8A8（FP16 写出）AI 仍 ≈ 2，相对 R ≈ 295 还是访存。
 - 表（FP16，相对 H100 三档）：
 
@@ -67,7 +67,7 @@
 
 结论句：线性层不是「计算 kernel」。同一层的 decode 和 prefill 在同一张 GPU 上是两种 regime。
 
-§7 那七个 shape 上，`regime_vs_h100_datasheet` 和 `regime_vs_requested_datasheet` 一致（M∈{1,4,32} 访存，M∈{344,512} ridge，M∈{2048,4096} 计算）。严格拐点不一致：M=344 的解析 AI=294.5284281，低于 H100 ridge 295.22，高于 A40 数据手册 ridge 215.08620689655172。`decision_log.csv` 里 `near_mstar` 的 `analytical_roofline_limit=compute`，三档仍是 ridge，`analytical_emit_both=true`。两列都不是实测 ridge。
+§7 那七个 shape 上，`regime_vs_h100_datasheet` 和 `regime_vs_requested_datasheet` 一致（M∈{1,4,32} 访存，M∈{344,512} ridge，M∈{2048,4096} 计算）。严格拐点不一致：M=344 的解析 AI=294.5284281，低于 H100 ridge 295.22，高于 A40 数据手册 ridge 215.08620689655172，所以三档仍是 ridge，严格 Roofline 是计算。两列都不是实测 ridge。第三次上传没有 `decision_log.csv`。`agreement.json` 是 profiler 字节的检查用一致率，不是 SCIC 准确率（§7）。
 
 ### 3.2 Attention：融合与否决定能不能进入计算侧
 
@@ -143,7 +143,7 @@ H = 4096，I = 14336，FP16。不加载空专家时：
 - **TBD：** 改用测量 regime 之后，有多少融合决策会翻。
 - **TBD：** 冷缓存最失真的站点（权重在 L2、因果掩码、paged KV）。
 
-第二次上传已经带了 `decision_log.csv` 和 `agreement.json`：`achieved_ai` 为空，`proxy_ai_status=TORCH_PROFILER_EMPTY`，`scic_accuracy_status=TBD_NO_MEASURED_AI`，`quote_as_scic_accuracy=false`，`n_with_byte_ai=0`。上面三条仍然是 TBD。`quote_as_scic_accuracy` 只有状态 `NSIGHT_DRAM` 才为真。`torch.profiler` 内存、缓存分配器差分和 `NSIGHT_DRAM_PROCESS_SUM` 的一致率不能填进这三条。
+第三次上传带了 `agreement.json`，没有 `decision_log.csv`：`achieved_ai` 为空（`TBD_NSIGHT`），`proxy_ai` 被 `torch.profiler` 填上且七行都是 4096，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM`。`scic_accuracy_status=PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，`quote_as_scic_accuracy=false`，`n_with_byte_ai=7`，`n_torch_profiler_memory=7`，两条检查用一致率都是 0.2857142857142857（`n_decision_flips_any_byte_source=5`）。上面三条准确率仍然是 TBD。不要把 0.2857142857142857 写成 SCIC 准确率。`quote_as_scic_accuracy` 只有状态 `NSIGHT_DRAM` 才为真。`torch.profiler` 内存、缓存分配器差分和 `NSIGHT_DRAM_PROCESS_SUM` 的一致率不能填进这三条。
 
 ## 5. 方法：双计划
 
@@ -168,11 +168,11 @@ H = 4096，I = 14336，FP16。不加载空专家时：
 | Attention score 写不写 | 联合调度可能输给 IO-aware kernel | 两套计划都不写；模式只选 tile 和额外 epilogue |
 | 每个专家同一模板？ | 常见做法 | 按专家分档，一层里可以异构 |
 | Stage-Stream | 对方的机制 | 不用、不声称、不实现 |
-| 本文证据 | | 闭式 AI、决策表，一条 A40 `torch.matmul` 曲线，以及不能当成融合加速的 fusion proxy（§7）。融合 kernel 时间 TBD |
+| 本文证据 | | 闭式 AI、决策表，第三次 A40 `torch.matmul` 曲线，copy 带宽估计（`ESTIMATE_COPY_NOT_NSIGHT`），以及不能当成融合加速的 fusion proxy（§7）。融合 kernel 时间 TBD |
 
 预期真正会分出胜负的，是 ridge 带和 Attention 的额外 epilogue：两边政策不一致的地方。远在访存侧时大家都融；远在计算侧时双计划会拒绝联合融合可能仍会尝试的融合。这个对比**还没跑**。
 
-## 7. 实验计划与第二次 A40 包
+## 7. 实验计划与第三次 A40 包
 
 解析部分：
 
@@ -180,74 +180,81 @@ H = 4096，I = 14336，FP16。不加载空专家时：
 pip install -r requirements.txt && pip install -e .
 python -m shapefuse selfcheck
 bash scripts/run_cpu.sh          # 无 GPU，PLACEHOLDER_NO_GPU
-# 强烈建议。这次归档没有 Nsight DRAM：
+# 管理员放开性能计数器并重启之后。DRAM 字节仍是 TBD：
 TRY_NSIGHT=1 bash scripts/run_a40.sh
 bash scripts/run_h100.sh         # 仍是 H100 锚点的 matmul 扫描，默认不开 profiler
 ```
 
-`ncu` 是 Nsight Compute，不是驱动，也不是 `nvidia-smi`。PATH 上没有 `ncu` 时，脚本会说明；若设了 `TRY_NSIGHT=1`，会写 `nsight_skipped.txt` 并继续跑 matmul。DRAM 字节保持为空。
+`ncu` 是 Nsight Compute，不是驱动，也不是 `nvidia-smi`。PATH 上没有 `ncu` 时，脚本会说明；若设了 `TRY_NSIGHT=1`，会写 `nsight_skipped.txt` 并继续跑 matmul。第三次包里 `ncu` 在 PATH 上，但失败码是 `ERR_NVGPUCTRPERM`。管理员步骤见 `docs/NSIGHT_PERMISSIONS.md`（`modprobe nvidia NVreg_RestrictProfilingToAdminUsers=0`，或写入 `/etc/modprobe.d/`，然后重启，再用 `ncu` 验证）。DRAM 字节保持为空。
 
 `selfcheck` 锁住第 3 节用到的闭式，包括 A40 数据手册 ridge 和 M\*。
 
-### 7.1 第二次寄回的 A40 结果（`PARTIAL_VENDOR_MATMUL`）
+### 7.1 第三次寄回的 A40 结果（`PARTIAL_VENDOR_MATMUL`）
 
-归档：`paper/data/a40/`（`bench_gemm.csv`、`summary.json`、`gpu_measurements.json`、`crossings.json`、`decision_log.csv`、`agreement.json`、`fusion_proxy.csv`）。图：`paper/fig_a40_torch_matmul_tflops.png`。
+归档：`paper/data/a40/`（`bench_gemm.csv`、`summary.json`、`gpu_measurements.json`、`crossings.json`、`agreement.json`、`fusion_proxy.csv`、`bandwidth_estimate.json`、`nsight_skipped.txt`、`nsight_error.log`）。这次上传没有 `decision_log.csv`。图：`paper/fig_a40_torch_matmul_tflops.png`。
 
 - 设备：NVIDIA A40。PyTorch 2.5.1+cu121，CUDA 12.1，Python 3.10.12。
-- 命令：`--bench-level a40 --machine A40_FP16 --profile torch --fusion-proxy`。ridge = 215.08620689655172，M\* = 240.32584259093773。`crossings.json` 含 `A40_FP16`。
+- 命令：`--bench-level a40 --machine A40_FP16 --profile torch --fusion-proxy`。ridge = 215.08620689655172，M\* = 240.32584259093773。`summary.json` 与 `crossings.json` 含 `A40_FP16`。
+- `nsight_skipped.txt`：`TRY_NSIGHT=1`，`ncu` 在 PATH 上，`scripts/nsight_dram.sh` 失败。`nsight_error.log` 是 `ERR_NVGPUCTRPERM`（进程 30939，设备 0 无权读 GPU 性能计数器）。
 - 计时的是 `torch.matmul`，FP16，N=K=4096。`kernel=pytorch_matmul`，`fused_plan_timed=false`。
-- `nsight_status=TBD_RUN_PROFILER`。`nsight_dram_bytes` 和 `achieved_ai` 为空（`TBD_NSIGHT`）。`proxy_ai_status=TORCH_PROFILER_EMPTY`。
-- `agreement.json`：`quote_as_scic_accuracy=false`，`scic_accuracy_status=TBD_NO_MEASURED_AI`，`n_with_byte_ai=0`。
+- `nsight_status=TBD_RUN_PROFILER`（没有 `nsight_dram.json`）。`nsight_dram_bytes` 和 `achieved_ai` 为空（`TBD_NSIGHT`）。
+- `proxy_ai_status=TORCH_PROFILER_MEMORY_NOT_DRAM`，`proxy_byte_source=key_averages.self_device_memory_usage`，七行 `proxy_ai` 都是 4096。字节数 8192、32768、262144、2818048、4194304、16777216、33554432，等于 FP16 输出矩阵 `M×4096×2`。`2MNK` 除以这个计数后 M 约掉，剩下 K=4096。
+- `agreement.json`：`quote_as_scic_accuracy=false`，`scic_accuracy_status=PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，`n_with_byte_ai=7`，`n_torch_profiler_memory=7`，`n_nsight_dram_isolated=0`。`regime_agreement_rate_any_byte_source` 和 `decision_agreement_rate_any_byte_source` 都是 0.2857142857142857，`n_decision_flips_any_byte_source=5`。4096 在 A40 和 H100 数据手册上都不低于 2R，所以 profiler 把七个 shape 都标成计算；解析档只在 M∈{2048,4096} 是计算。不要把 0.2857142857142857 写成 SCIC 准确率。
 - 下表的 median_s 和 TFLOP/s 是 CSV 原文。两列 regime 都是数据手册三档，不是实测 ridge。
 
 | label | M | median_s | TFLOP/s | 解析 AI | 相对 A40 数据手册 | 相对 H100 数据手册 |
 | --- | --- | --- | --- | --- | --- | --- |
-| decode_gemv | 1 | 7.160000131e-05 | 0.4686373099 | 0.9995 | 访存 | 访存 |
-| micro_batch | 4 | 7.948799804e-05 | 1.688528222 | 3.992 | 访存 | 访存 |
-| decode_batch32 | 32 | 7.948800176e-05 | 13.50822514 | 31.51 | 访存 | 访存 |
-| near_mstar | 344 | 0.000143648006 | 80.35422786 | 294.5 | ridge | ridge |
-| ridge_m512 | 512 | 0.0001795520037 | 95.68185721 | 409.6 | ridge | ridge |
-| prefill_m2048 | 2048 | 0.0006596159935 | 104.1810347 | 1024 | 计算 | 计算 |
-| square_large | 4096 | 0.001194959998 | 115.0155266 | 1365 | 计算 | 计算 |
+| decode_gemv | 1 | 7.072000206e-05 | 0.4744687645 | 0.9995 | 访存 | 访存 |
+| micro_batch | 4 | 7.864000276e-05 | 1.706736054 | 3.992 | 访存 | 访存 |
+| decode_batch32 | 32 | 7.822399959e-05 | 13.7265012 | 31.51 | 访存 | 访存 |
+| near_mstar | 344 | 0.000141967997 | 81.30511704 | 294.5 | ridge | ridge |
+| ridge_m512 | 512 | 0.0001788479984 | 96.05849291 | 409.6 | ridge | ridge |
+| prefill_m2048 | 2048 | 0.0006588959992 | 104.2948763 | 1024 | 计算 | 计算 |
+| square_large | 4096 | 0.00119116801 | 115.3816693 | 1365 | 计算 | 计算 |
 
-`achieved_tflops_max` = 115.01552661761667。`fraction_of_requested_datasheet_peak` = 0.7683067910328436，即相对 A40 数据手册 149.7 约 76.8%。`fraction_of_h100_fp16_datasheet_peak` = 0.11629476907746883，是同一吞吐相对 H100 数据手册 989。`measured_ridge_flops_per_byte` 仍是 null。
+`achieved_tflops_max` = 115.38166932883347。`fraction_of_requested_datasheet_peak` = 0.7707526341271441，即相对 A40 数据手册 149.7 约 77.1%。`fraction_of_h100_fp16_datasheet_peak` = 0.11666498415453333，是同一吞吐相对 H100 数据手册 989。`measured_ridge_flops_per_byte` 仍是 null。
 
-可以写的句子：吞吐从 M=1 的 0.4686373099 TFLOP/s 升到 M=4096 的 115.0155266；M≤32 时中位时间停在约 7.2e-5–7.9e-5 s，FLOP 已经增加 32 倍，这是 launch 主导的一端。三档上 A40 数据手册和 H100 数据手册一致。
+可以写的句子：吞吐从 M=1 的 0.4744687645 TFLOP/s 升到 M=4096 的 115.3816693；M≤32 时中位时间停在约 7.07e-5–7.86e-5 s，FLOP 已经增加 32 倍，这是 launch 主导的一端。三档上 A40 数据手册和 H100 数据手册一致。
 
-不要写的句子：融合加速、MemMode 对 ComputeMode、Nsight achieved AI、H100 时延、A40 上测到了 ridge、SCIC 准确率。
+不要写的句子：融合加速、MemMode 对 ComputeMode、Nsight achieved AI、H100 时延、A40 上测到了 ridge、把 0.2857142857142857 当成 SCIC 准确率。
 
-H100 matmul 表继续空着。Achieved AI = FLOPs / 实测 DRAM 字节，不是 FLOPs / 时延。
+H100 matmul 表继续空着。Achieved AI = FLOPs / 实测 DRAM 字节，不是 FLOPs / 时延，也不是 FLOPs / profiler 显存。
+
+#### copy 带宽（`ESTIMATE_COPY_NOT_NSIGHT`）
+
+`bandwidth_estimate.json` 的 `status` 是 `ESTIMATE_COPY_NOT_NSIGHT`。`not_nsight`、`not_a_measured_ridge`、`do_not_write_measured_ridge_flops_per_byte` 都是 true。10 次 device-to-device copy，268435456 个 FP16 元素，读写都计，10737418240 字节，用时 0.01883420753479004 s。`estimated_bandwidth_gb_per_s` = 570.1019392595165（约 570.1 GB/s）。`estimated_ridge_flops_per_byte` = 262.5846181025793，分子是数据手册 FLOP 峰值 149.7 TFLOP/s，分母是这次 copy 带宽。`measured_hbm_bandwidth_bytes_per_s` 和 `measured_ridge_flops_per_byte` 都是 null。不要用 262.5846181025793 替换数据手册 ridge 215.08620689655172。
 
 #### 融合代理（`PROXY_NOT_FUSION_SPEEDUP`）
 
-`fusion_proxy.ran=true`，`status=PROXY_NOT_FUSED_GEMM`，`triton_used=false`，`torch_compile_used=true`。`claims_memmode_kernel`、`claims_computemode_kernel`、`claims_stage_stream` 都是 false。每一行 `time_ratio_status=PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。时间比是两段基线除以该变体，不是融合加速。
+`fusion_proxy.ran=true`，`status=PROXY_NOT_FUSED_GEMM`，`triton_used=true`，`torch_compile_used=true`。`claims_memmode_kernel`、`claims_computemode_kernel`、`claims_stage_stream` 都是 false。每一行 `ok=true`，`time_ratio_status=PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。时间比是两段基线除以该变体，不是融合加速。
 
 matmul+RMSNorm：
 
 - `unfused_two_regions`：两段分开计时再相加。
-- `eager_chain`：仍是两次 eager launch。CSV 时间比：M=1 为 1.388005185，M=4 为 1.46125371，M=4096 为 1.006475964（中间各档见 CSV）。
-- `torch_compile`：没有检查图，不能当成已经融合。M=1 的时间比是 0.8089665914（比两段之和更慢），M=4096 是 1.201995369。
+- `eager_chain`：仍是两次 eager launch。CSV 时间比：M=1 为 1.398085063，M=4 为 1.328853438，M=32 为 1.393103491，M=344 为 1.332332706，M=512 为 1.143115217，M=2048 为 1.016681221，M=4096 为 1.012774456。
+- `torch_compile`：没有检查图，不能当成已经融合。M=1 为 1.378291104，M=4 为 1.509902163，M=4096 为 1.211543482（中间各档见 CSV）。
 
 bias+GELU（GEMM 输出已经物化，不是 GEMM 融合）：
 
-- hand stub 时间比从 M=1 的 1.162706454 到 M=4096 的 1.011971539。
-- Triton 七行全部 `ok=false`，`TRITON_KERNEL_FAILED`，错误是 `NameError('tl is not defined')`，出在 `BLOCK: tl.constexpr`。没有 Triton 时间。
+- hand stub 时间比从 M=1 的 1.132994609 到 M=4096 的 1.013019741。
+- Triton 七行全部 `ok=true`，诚实标签 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`。时间比：M=1 为 1.993904752，M=4 为 1.51406735，M=32 为 1.505031954，M=344 为 1.557734173，M=512 为 1.879358184，M=2048 为 4.484666033，M=4096 为 5.375718689。这是已经物化矩阵上的一个逐元素 kernel，不是融合 GEMM。上一包的 `NameError('tl is not defined')` 不是这一包的结果。
 
 ### 7.2 下一轮脚本
 
-强烈建议 `TRY_NSIGHT=1`。没有 `ncu` 就先安装 Nsight Compute，用 `ncu --version` 确认，再用 `ncu --query-metrics | grep dram__bytes` 看指标名。
+第三次已经设了 `TRY_NSIGHT=1`，`ncu` 也在 PATH 上，失败原因是 `ERR_NVGPUCTRPERM`。下一轮先让管理员按 `docs/NSIGHT_PERMISSIONS.md` 放开计数器并重启，再跑 `TRY_NSIGHT=1`。没有 `ncu` 才是安装缺口：用 `ncu --version` 确认，再用 `ncu --query-metrics | grep dram__bytes` 看指标名。权限错误改 `NCU_METRICS` 解决不了。
 
-相对这次归档，代码侧已改、但还不是测量结果：Triton bias+GELU 在模块作用域 `import triton.language as tl`；profiler 改读 `self_device_memory_usage`，事件仍为空时才用缓存分配器差分，状态 `TORCH_ALLOCATOR_DELTA_NOT_DRAM`，仍然不是 DRAM，也不能当 SCIC 准确率。`TORCH_PROFILER_EMPTY` 表示两个来源都没有字节。
+这一包已经说明的钩子（仍受上面的限制）：Triton bias+GELU 启动成功，状态 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`；profiler 读到了 `self_device_memory_usage`，状态 `TORCH_PROFILER_MEMORY_NOT_DRAM`，`proxy_ai` 卡在 4096。两者都不是 DRAM，也不能当 SCIC 准确率。
 
-脚本末尾会跑 copy kernel 带宽探针，写入 `bandwidth_estimate.json`，状态 `ESTIMATE_COPY_NOT_NSIGHT`。ridge 的分子是数据手册 FLOP 峰值。不要写进 `measured_ridge_flops_per_byte`。
+脚本末尾会跑 copy kernel 带宽探针，写入 `bandwidth_estimate.json`，状态 `ESTIMATE_COPY_NOT_NSIGHT`。第三次已经写出 570.1019392595165 GB/s 和估计 ridge 262.5846181025793。ridge 的分子是数据手册 FLOP 峰值。不要写进 `measured_ridge_flops_per_byte`。
 
 | 产物 | 诚实等级 |
 | --- | --- |
 | `bench_gemm.csv` | 仍是 `torch.matmul`。没有 Nsight JSON 时 `achieved_ai` 留空 |
-| `proxy_ai` | profiler 事件为 `TORCH_PROFILER_MEMORY_NOT_DRAM`；只有分配器差分时为 `TORCH_ALLOCATOR_DELTA_NOT_DRAM`；都没有则 `TORCH_PROFILER_EMPTY`。不是 DRAM |
-| `fusion_proxy.csv` | 时间比状态固定 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。不是融合 GEMM。`memmode_kernel=false` |
-| `decision_log.csv`、`agreement.json` | 只有 `NSIGHT_DRAM` 时 `quote_as_scic_accuracy=true` |
+| `proxy_ai` | 这一包是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，值 4096，字节像输出矩阵。只有分配器差分时为 `TORCH_ALLOCATOR_DELTA_NOT_DRAM`；都没有则 `TORCH_PROFILER_EMPTY`。不是 DRAM |
+| `fusion_proxy.csv` | 时间比状态固定 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。Triton 行是 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`。不是融合 GEMM。`memmode_kernel=false` |
+| `agreement.json` | 这一包 `quote_as_scic_accuracy=false`，状态 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，一致率 0.2857142857142857。不能当准确率 |
 | `nsight_dram.json` | 仅 `TRY_NSIGHT=1` 且 `ncu` 成功。状态 `NSIGHT_DRAM_PROCESS_SUM` |
+| `nsight_error.log` | `ncu` 失败时的 stderr。这一包是 `ERR_NVGPUCTRPERM` |
 | `nsight_skipped.txt` | `TRY_NSIGHT=1` 但没有 `ncu`，或 ncu 失败 |
 | `bandwidth_estimate.json` | `ESTIMATE_COPY_NOT_NSIGHT`。不是 Nsight，不是实测 ridge |
 
@@ -256,12 +263,13 @@ bias+GELU（GEMM 输出已经物化，不是 GEMM 融合）：
 | 实验 | 状态 |
 | --- | --- |
 | 解析 AI、分档、M\*、计划表、图 | 完成 |
-| A40 上 matmul 时延 / TFLOP/s，A40 数据手册三档 | 完成，§7.1，`PARTIAL_VENDOR_MATMUL`，`--machine A40_FP16` |
-| A40 fusion proxy | 跑过。Triton 行 `NameError('tl is not defined')`。时间比不是融合加速 |
+| A40 上 matmul 时延 / TFLOP/s，A40 数据手册三档 | 完成，§7.1，第三次包，`PARTIAL_VENDOR_MATMUL`，`--machine A40_FP16` |
+| A40 fusion proxy | 跑过。Triton 行 `ok=true`，`TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`。时间比不是融合加速 |
+| A40 copy 带宽估计 | 已写出，`ESTIMATE_COPY_NOT_NSIGHT`，570.1019392595165 GB/s，估计 ridge 262.5846181025793。`measured_ridge_flops_per_byte` 为 null |
 | H100 上 matmul 时延 / TFLOP/s | TBD，脚本 `scripts/run_h100.sh` |
-| Nsight DRAM 字节、achieved AI | TBD。`nsight_status=TBD_RUN_PROFILER`。下一轮 `TRY_NSIGHT=1`。没有 `ncu` 是安装缺口，不是测得 0 |
-| 机器实测 ridge | TBD。copy 探针若写出，状态是 `ESTIMATE_COPY_NOT_NSIGHT`，不是这一行 |
-| SCIC 对孤立 Nsight AI 的准确率 | TBD。归档 `agreement.json` 是 `TBD_NO_MEASURED_AI`，`quote_as_scic_accuracy` 为 false |
+| Nsight DRAM 字节、achieved AI | TBD。`nsight_status=TBD_RUN_PROFILER`。第三次 `TRY_NSIGHT=1` 且 `ncu` 在 PATH 上，失败码 `ERR_NVGPUCTRPERM`。下一轮：`docs/NSIGHT_PERMISSIONS.md`，重启，再 `TRY_NSIGHT=1`。这不是测得 0 |
+| 机器实测 ridge | TBD。copy 探针的状态是 `ESTIMATE_COPY_NOT_NSIGHT`，不是这一行 |
+| SCIC 对孤立 Nsight AI 的准确率 | TBD。归档 `agreement.json` 是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，一致率 0.2857142857142857，`quote_as_scic_accuracy` 为 false |
 | MemMode / ComputeMode / 总是融 / 从不融 | TBD；fusion proxy 不是这一行 |
 | 短 S 与长 S 的 Attention 主循环 | TBD |
 | MoE 倾斜与空专家权重 | TBD |
@@ -286,11 +294,13 @@ bias+GELU（GEMM 输出已经物化，不是 GEMM 融合）：
 - Softmax / RMSNorm 的 FLOP 常数是约定。
 - 数据手册峰值不是机柜里那张卡。FP8 的 M\* 几乎不变，依赖于峰值和字节同比例变化。
 - 双计划没有寄存器 spill 模型。ComputeMode 拒绝融合，是对照 Self-Attn 反例的政策，不是 spill 代价。AI × spill × SMEM 的联合代价是后续工作，本文不声称已经做了。
-- 没有 MemMode / ComputeMode kernel，没有 Nsight trace，没有 tokens/s。§7 的 A40 数字是 `torch.matmul` 的时延和 TFLOP/s，加上不能当成融合加速的 fusion proxy。`quote_as_scic_accuracy` 为 false。Triton 行在出时间之前就失败了。
+- 没有 MemMode / ComputeMode kernel，没有 tokens/s。§7 的第三次 A40 数字是 `torch.matmul` 的时延和 TFLOP/s，加上不能当成融合加速的 fusion proxy，以及 copy 估计（`ESTIMATE_COPY_NOT_NSIGHT`，570.1019392595165 GB/s，估计 ridge 262.5846181025793）。`measured_ridge_flops_per_byte` 为 null。`quote_as_scic_accuracy` 为 false。profiler 一致率 0.2857142857142857 的状态是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，不是 SCIC 准确率。
+- Nsight 被 `ERR_NVGPUCTRPERM` 挡住。`TRY_NSIGHT=1` 时 `ncu` 在 PATH 上，但读不了 GPU 性能计数器（`nsight_error.log`）。`achieved_ai` 仍为空，`nsight_status` 仍是 `TBD_RUN_PROFILER`。管理员步骤在 `docs/NSIGHT_PERMISSIONS.md`；重启后再跑一次 `TRY_NSIGHT=1`。
+- 这一包的 Triton bias+GELU 行已经跑起来（`ok=true`，`TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`）。它是已经物化矩阵上的逐元素 stub，不是融合 GEMM。
 
 ## 10. 结论句（可直接用）
 
-在 H100 这一档的 Roofline 上，宽度 4096 的 FP16 方阵投影大约在 M\* ≈ 345 换边；同一闭式放到 A40 数据手册（149.7 TFLOP/s，696 GB/s，R = 215.08620689655172）上，M\* = 240.32584259093773，第二次上传的 `crossings.json` 里有这一项。IO-aware Attention 的强度随 S 换边，把 score 写回 HBM 的实现则不会；倾斜的 MoE 一层之内就同时有两种 regime。按算子种类做死的融合跟不上这些穿越。SCIC 把 regime 从 shape 和流量里算出来，双计划把它变成 MemMode、ComputeMode 或两者都要。Stage-Stream 不属于这个设计。设备上目前是 `--machine A40_FP16` 的一条 `torch.matmul` 曲线，状态 `PARTIAL_VENDOR_MATMUL`：M=1 为 0.4686373099 TFLOP/s，M=4096 为 115.0155266 TFLOP/s，相对 A40 数据手册峰值的比例是 0.7683067910328436，不是实测 ridge。Nsight 没抓（`TBD_RUN_PROFILER`），`proxy_ai` 是 `TORCH_PROFILER_EMPTY`，`quote_as_scic_accuracy` 为 false。fusion proxy 跑过，时间比是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`，Triton bias+GELU 因 `NameError('tl is not defined')` 失败。融合 kernel、实测 ridge、tokens/s 仍然是 TBD。
+在 H100 这一档的 Roofline 上，宽度 4096 的 FP16 方阵投影大约在 M\* ≈ 345 换边；同一闭式放到 A40 数据手册（149.7 TFLOP/s，696 GB/s，R = 215.08620689655172）上，M\* = 240.32584259093773，第三次上传的 `summary.json` 和 `crossings.json` 里有这一项。IO-aware Attention 的强度随 S 换边，把 score 写回 HBM 的实现则不会；倾斜的 MoE 一层之内就同时有两种 regime。按算子种类做死的融合跟不上这些穿越。SCIC 把 regime 从 shape 和流量里算出来，双计划把它变成 MemMode、ComputeMode 或两者都要。Stage-Stream 不属于这个设计。设备上目前是 `--machine A40_FP16` 的第三次 `torch.matmul` 曲线，状态 `PARTIAL_VENDOR_MATMUL`：M=1 为 0.4744687645 TFLOP/s，M=4096 为 115.3816693 TFLOP/s，相对 A40 数据手册峰值的比例是 0.7707526341271441，不是实测 ridge。`TRY_NSIGHT=1` 找到了 `ncu`，随后 `ERR_NVGPUCTRPERM`，`achieved_ai` 仍为空（`TBD_RUN_PROFILER`）。`proxy_ai` 是 `TORCH_PROFILER_MEMORY_NOT_DRAM`，卡在 4096。`quote_as_scic_accuracy` 为 false；检查用一致率 0.2857142857142857 的状态是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`，不是 SCIC 准确率。copy 估计是 `ESTIMATE_COPY_NOT_NSIGHT`（570.1019392595165 GB/s，估计 ridge 262.5846181025793），`measured_ridge_flops_per_byte` 为 null。fusion proxy 跑过，时间比是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。Triton bias+GELU 是 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION` 且 `ok=true`，这是逐元素 stub，不是融合 GEMM。融合 kernel、实测 ridge、tokens/s 仍然是 TBD。
 
 ## 11. 图表与文件对照
 
@@ -303,12 +313,12 @@ bias+GELU（GEMM 输出已经物化，不是 GEMM 融合）：
 | 量化 what-if | `quant_epilogue.csv` |
 | 逐元素 | `ew_chains.csv` |
 | 计划 | `dual_plans.csv`，`fig_plan_regions.png` |
-| 设备 matmul | `bench_gemm.csv`，`gpu_measurements.json`；第二次 A40 归档在 `paper/data/a40/`，图 `paper/fig_a40_torch_matmul_tflops.png` |
-| A40 crossings | 归档里 `crossings.json` 的 `A40_FP16`（数据手册，不是实测） |
-| 决策日志 | `decision_log.csv`，`agreement.json`（仅 `quote_as_scic_accuracy` 为真时才能当准确率；这次归档为 false） |
-| 融合代理 | `fusion_proxy.csv`（`PROXY_TIMING_NOT_A_FUSION_SPEEDUP`；不是 MemMode / ComputeMode） |
-| Nsight | `nsight_dram.json`，仅 `TRY_NSIGHT=1` 且 `ncu` 成功。没有 `ncu` 时是 `nsight_skipped.txt` |
-| copy 估计 | `bandwidth_estimate.json`，`ESTIMATE_COPY_NOT_NSIGHT`，不是实测 ridge |
+| 设备 matmul | `bench_gemm.csv`，`gpu_measurements.json`；第三次 A40 归档在 `paper/data/a40/`，图 `paper/fig_a40_torch_matmul_tflops.png` |
+| A40 crossings | 归档里 `crossings.json` 的 `A40_FP16`，与 `summary.json` 一致（数据手册，不是实测） |
+| 一致率 | `agreement.json`。`quote_as_scic_accuracy` 为 false（`PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`）。这次上传没有 `decision_log.csv` |
+| 融合代理 | `fusion_proxy.csv`（`PROXY_TIMING_NOT_A_FUSION_SPEEDUP`；Triton 行 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`；不是 MemMode / ComputeMode） |
+| Nsight | `nsight_dram.json` 仅 `TRY_NSIGHT=1` 且 `ncu` 成功。这一包是 `nsight_error.log`（`ERR_NVGPUCTRPERM`）和 `nsight_skipped.txt`。管理员步骤：`docs/NSIGHT_PERMISSIONS.md` |
+| copy 估计 | `bandwidth_estimate.json`，`ESTIMATE_COPY_NOT_NSIGHT`，估计 ridge 262.5846181025793，`measured_ridge_flops_per_byte` 为 null |
 
 ## 12. 写作时不要出现的句子
 
@@ -317,8 +327,9 @@ bias+GELU（GEMM 输出已经物化，不是 GEMM 融合）：
 - 「H100 上融合加速了 X 倍。」（在 kernel 测出来之前。）
 - 把 `run_cpu.sh` 的 NumPy 时延标成 H100。
 - 把 `torch.matmul` 的扫参写成 MemMode 对 ComputeMode 的对比。
-- 把 A40 上 115.01552661761667 / 989 说成「这张卡只跑到峰值的 12%」。那是相对 H100 数据手册（`fraction_of_h100_fp16_datasheet_peak` = 0.11629476907746883）。相对 A40 数据手册 149.7 的比例是 0.7683067910328436，而且仍不是实测 ridge。
-- 把 `torch.profiler` 的显存、缓存分配器差分或 `NSIGHT_DRAM_PROCESS_SUM` 的一致率写成 SCIC 准确率。这次归档的 `quote_as_scic_accuracy` 是 false。
-- 把 `fusion_proxy.csv` 的时间比写成融合加速。状态是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。
-- 把 copy kernel 的 `ESTIMATE_COPY_NOT_NSIGHT` 写成 Nsight 或实测 ridge。
-- 把 Triton 的 `NameError('tl is not defined')` 写成融合失败的性能结论。那一行没有时间。
+- 把 A40 上 115.38166932883347 / 989 说成「这张卡只跑到峰值的 12%」。那是相对 H100 数据手册（`fraction_of_h100_fp16_datasheet_peak` = 0.11666498415453333）。相对 A40 数据手册 149.7 的比例是 0.7707526341271441，而且仍不是实测 ridge。
+- 把 `torch.profiler` 的显存、缓存分配器差分或 `NSIGHT_DRAM_PROCESS_SUM` 的一致率写成 SCIC 准确率。这次归档的 `quote_as_scic_accuracy` 是 false，状态是 `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`。0.2857142857142857 只是检查用数字。
+- 把 `fusion_proxy.csv` 的时间比写成融合加速。状态是 `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`。Triton 行是 `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`，不是融合 GEMM。
+- 把 copy kernel 的 `ESTIMATE_COPY_NOT_NSIGHT` 写成 Nsight 或实测 ridge。570.1019392595165 GB/s 和 262.5846181025793 都是估计，`measured_ridge_flops_per_byte` 保持 null。
+- 把 `ERR_NVGPUCTRPERM` 写成「DRAM 字节测得为 0」。`ncu` 没有读到计数器，`achieved_ai` 仍是 TBD。
+- 把上一包 Triton 的 `NameError('tl is not defined')` 写成这一包的结果。这一包七行 `ok=true`，但时间比仍不是融合加速。

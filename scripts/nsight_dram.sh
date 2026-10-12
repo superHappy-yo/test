@@ -14,6 +14,12 @@
 # including copies. Do not relabel the status to NSIGHT_DRAM unless you have
 # filtered to the matmul kernel. torch.profiler memory is a different file
 # and is not DRAM.
+#
+# ERR_NVGPUCTRPERM means ncu is installed but this user cannot read GPU
+# performance counters. That is not a bad metric name. Admin steps:
+# docs/NSIGHT_PERMISSIONS.md (modprobe NVreg_RestrictProfilingToAdminUsers=0
+# or /etc/modprobe.d/, then reboot). The failing ncu text is saved to
+# $OUT/nsight_error.log.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,14 +50,37 @@ rm -f "$JSON"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
+ERR_LOG="$OUT/nsight_error.log"
+rm -f "$ERR_LOG"
+
 while read -r label m n k; do
   echo "ncu: $label ${m}x${n}x${k}"
-  if ! ncu --csv --metrics "$METRICS" \
+  set +e
+  ncu --csv --metrics "$METRICS" \
       "$PYTHON" -m shapefuse.nsight_worker --label "$label" --m "$m" --n "$n" --k "$k" \
-      >"$TMP"; then
-    echo "ERROR: ncu failed for $label."
-    echo "Check metric names: ncu --query-metrics | grep dram__bytes"
-    echo "Override with NCU_METRICS=metric.a,metric.b"
+      >"$TMP" 2>"$ERR_LOG"
+  ncu_status=$?
+  set -e
+  if [[ -s "$TMP" ]] && grep -q "ERR_NVGPUCTRPERM" "$TMP"; then
+    cat "$TMP" >>"$ERR_LOG"
+  fi
+  if [[ "$ncu_status" -ne 0 ]]; then
+    echo "ncu failed for $label (exit ${ncu_status}). Log: $ERR_LOG"
+    if [[ -f "$ERR_LOG" ]]; then
+      cat "$ERR_LOG"
+    fi
+    if [[ -f "$ERR_LOG" ]] && grep -q "ERR_NVGPUCTRPERM" "$ERR_LOG"; then
+      echo "ERROR: ERR_NVGPUCTRPERM — this user cannot access NVIDIA GPU performance counters."
+      echo "ncu is installed. This is not a missing metric name. achieved_ai was not filled."
+      echo "An administrator must allow profiling, then reboot. Steps: docs/NSIGHT_PERMISSIONS.md"
+      echo "https://developer.nvidia.com/ERR_NVGPUCTRPERM"
+      echo "After reboot, verify ncu and re-run: TRY_NSIGHT=1 bash scripts/run_a40.sh"
+      echo "torch.profiler memory is not DRAM bytes."
+    else
+      echo "ERROR: ncu failed for $label."
+      echo "Check metric names: ncu --query-metrics | grep dram__bytes"
+      echo "Override with NCU_METRICS=metric.a,metric.b"
+    fi
     exit 1
   fi
   "$PYTHON" -m shapefuse.nsight_worker \

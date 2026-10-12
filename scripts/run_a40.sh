@@ -8,13 +8,16 @@
 #   - matmul+RMSNorm and bias+GELU proxies (not MemMode / ComputeMode)
 #   - dual-plan decision_log.csv and agreement.json
 #
-# Nsight DRAM bytes are still missing from the archived A40 package
-# (nsight_status TBD_RUN_PROFILER, quote_as_scic_accuracy false).
-# Strongly recommended on the next server run:
+# Nsight DRAM bytes are still missing from the third A40 package.
+# TRY_NSIGHT=1 found ncu on PATH; ncu then failed with ERR_NVGPUCTRPERM
+# (see paper/data/a40/nsight_error.log). achieved_ai is empty.
+# quote_as_scic_accuracy is false. Fix permissions, reboot, then:
 #   TRY_NSIGHT=1 bash scripts/run_a40.sh
+# Admin steps: docs/NSIGHT_PERMISSIONS.md
 # ncu is Nsight Compute, separate from the NVIDIA driver. If `ncu` is not on
 # PATH the capture is skipped, a note is written to nsight_skipped.txt, and
-# the matmul sweep still runs. torch.profiler memory is not a substitute.
+# the matmul sweep still runs. The same note is written when ncu fails,
+# including ERR_NVGPUCTRPERM. torch.profiler memory is not a substitute.
 # achieved_ai stays empty until ncu succeeds.
 #
 # A copy-kernel bandwidth estimate is also written when CUDA works. Its
@@ -66,9 +69,12 @@ esac
 
 echo
 echo "==== Nsight DRAM: strongly recommended (TRY_NSIGHT=1) ===="
-echo "The archived A40 package has no DRAM bytes. SCIC accuracy stays"
-echo "quote_as_scic_accuracy=false until an isolated Nsight capture exists."
-echo "Recommended command: TRY_NSIGHT=1 bash scripts/run_a40.sh"
+echo "The third A40 package has no DRAM bytes. ncu was on PATH and failed"
+echo "with ERR_NVGPUCTRPERM (GPU performance-counter permission)."
+echo "SCIC accuracy stays quote_as_scic_accuracy=false until an isolated"
+echo "Nsight capture exists. Admin steps, then reboot:"
+echo "  docs/NSIGHT_PERMISSIONS.md"
+echo "After that: TRY_NSIGHT=1 bash scripts/run_a40.sh"
 mkdir -p "$OUT"
 if command -v ncu >/dev/null 2>&1; then
   echo "ncu: found at $(command -v ncu)"
@@ -100,19 +106,41 @@ EOF
     echo "Wrote $OUT/nsight_skipped.txt"
   elif OUT="$OUT" PYTHON="$PYTHON" bash "$ROOT/scripts/nsight_dram.sh"; then
     NSIGHT_ARGS=(--nsight-json "$OUT/nsight_dram.json")
-    rm -f "$OUT/nsight_skipped.txt"
+    rm -f "$OUT/nsight_skipped.txt" "$OUT/nsight_error.log"
   else
     echo "WARNING: Nsight capture failed. Continuing without DRAM bytes."
     echo "torch.profiler output is allocator memory, not achieved AI."
-    echo "If ncu rejected metric names: ncu --query-metrics | grep dram__bytes"
-    echo "Override with NCU_METRICS=metric.a,metric.b"
-    cat >"$OUT/nsight_skipped.txt" <<EOF
+    if [[ -f "$OUT/nsight_error.log" ]] && grep -q "ERR_NVGPUCTRPERM" "$OUT/nsight_error.log"; then
+      echo "ncu returned ERR_NVGPUCTRPERM: this user cannot access GPU performance counters."
+      echo "That is a permission error, not a missing metric. achieved_ai stays empty."
+      echo "Admin steps: docs/NSIGHT_PERMISSIONS.md"
+      echo "https://developer.nvidia.com/ERR_NVGPUCTRPERM"
+      echo "After reboot, re-run: TRY_NSIGHT=1 bash scripts/run_a40.sh"
+      cat >"$OUT/nsight_skipped.txt" <<EOF
+TRY_NSIGHT=1 was set and ncu was on PATH, but ncu failed with ERR_NVGPUCTRPERM.
+The user does not have permission to access NVIDIA GPU Performance Counters.
+achieved_ai was not filled. This is not a missing-metric failure.
+See docs/NSIGHT_PERMISSIONS.md
+https://developer.nvidia.com/ERR_NVGPUCTRPERM
+torch.profiler memory is not DRAM bytes.
+After an administrator allows profiling and the machine reboots, re-run:
+TRY_NSIGHT=1 bash scripts/run_a40.sh
+EOF
+    else
+      echo "If ncu rejected metric names: ncu --query-metrics | grep dram__bytes"
+      echo "Override with NCU_METRICS=metric.a,metric.b"
+      echo "If the log says ERR_NVGPUCTRPERM, see docs/NSIGHT_PERMISSIONS.md"
+      cat >"$OUT/nsight_skipped.txt" <<EOF
 TRY_NSIGHT=1 was set and ncu was on PATH, but scripts/nsight_dram.sh failed.
-achieved_ai was not filled. See the script output above.
+achieved_ai was not filled. See the script output above and nsight_error.log if present.
 Check: ncu --query-metrics | grep dram__bytes
 Override metric names with NCU_METRICS.
+If the log contains ERR_NVGPUCTRPERM, this user cannot access GPU performance counters.
+Admin steps: docs/NSIGHT_PERMISSIONS.md
+https://developer.nvidia.com/ERR_NVGPUCTRPERM
 torch.profiler memory is not DRAM bytes.
 EOF
+    fi
   fi
 else
   echo "TRY_NSIGHT is not 1. nsight_dram.json will not be written."

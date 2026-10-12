@@ -32,7 +32,7 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | `gpu_measurements.json` | device metadata, agreement summary, fusion-proxy summary, explicit nulls |
 | `summary.json` | machine, crossings, highlights, TBD list |
 | `fig_*.png` | analytical figures, plus `fig_vendor_matmul_tflops.png` when a bench ran |
-| `nsight_dram.json` | optional, from `scripts/nsight_dram.sh`. Not written by the CLI itself. Strongly recommended via `TRY_NSIGHT=1`. If `ncu` is missing, `scripts/run_a40.sh` writes `nsight_skipped.txt` instead |
+| `nsight_dram.json` | optional, from `scripts/nsight_dram.sh`. Not written by the CLI itself. Strongly recommended via `TRY_NSIGHT=1`. If `ncu` is missing or fails (`ERR_NVGPUCTRPERM` included), `scripts/run_a40.sh` writes `nsight_skipped.txt`. See `docs/NSIGHT_PERMISSIONS.md` |
 | `bandwidth_estimate.json` | optional copy-kernel estimate from `scripts/bandwidth_probe.sh`. Status `ESTIMATE_COPY_NOT_NSIGHT`. Not a measured ridge |
 | `SEND_BACK.txt` | checklist of what to return |
 
@@ -46,4 +46,4 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 - end-to-end tokens/s
 - `quote_as_scic_accuracy` stays false for profiler memory and for `NSIGHT_DRAM_PROCESS_SUM`
 
-Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. `ncu` is Nsight Compute, separate from the driver; if it is missing, `scripts/run_a40.sh` writes `nsight_skipped.txt` when `TRY_NSIGHT=1` and leaves `achieved_ai` empty. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency. `--machine a40` selects the A40 datasheet preset (149.7 TFLOP/s, 696 GB/s). That preset is not a measured ridge. The archived second A40 package used `--machine A40_FP16`. Its regime column is that datasheet, Nsight was not captured, and `quote_as_scic_accuracy` is false.
+Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. `ncu` is Nsight Compute, separate from the driver; if it is missing, or if it fails, `scripts/run_a40.sh` writes `nsight_skipped.txt` when `TRY_NSIGHT=1` and leaves `achieved_ai` empty. `ERR_NVGPUCTRPERM` is a performance-counter permission error: see `docs/NSIGHT_PERMISSIONS.md`, reboot, then `TRY_NSIGHT=1` again. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency. `--machine a40` selects the A40 datasheet preset (149.7 TFLOP/s, 696 GB/s). That preset is not a measured ridge. The archived third A40 package used `--machine A40_FP16`. Its regime column is that datasheet. `ncu` failed with `ERR_NVGPUCTRPERM`, `proxy_ai` is `TORCH_PROFILER_MEMORY_NOT_DRAM`, and `quote_as_scic_accuracy` is false. `bandwidth_estimate.json` in that package is `ESTIMATE_COPY_NOT_NSIGHT` and does not fill `measured_ridge_flops_per_byte`.

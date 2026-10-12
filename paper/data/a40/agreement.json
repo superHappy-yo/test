@@ -1,18 +1,19 @@
 {
   "n_shapes": 7,
-  "n_with_byte_ai": 0,
+  "n_with_byte_ai": 7,
   "n_nsight_dram_isolated": 0,
   "n_nsight_process_sum": 0,
-  "n_torch_profiler_memory": 0,
-  "regime_agreement_rate_any_byte_source": null,
-  "decision_agreement_rate_any_byte_source": null,
-  "n_decision_flips_any_byte_source": 0,
+  "n_torch_profiler_memory": 7,
+  "n_torch_allocator_delta": 0,
+  "regime_agreement_rate_any_byte_source": 0.2857142857142857,
+  "decision_agreement_rate_any_byte_source": 0.2857142857142857,
+  "n_decision_flips_any_byte_source": 5,
   "regime_agreement_rate_nsight_isolated": null,
   "decision_agreement_rate_nsight_isolated": null,
   "regime_agreement_rate_nsight_process_sum": null,
   "decision_agreement_rate_nsight_process_sum": null,
-  "scic_accuracy_status": "TBD_NO_MEASURED_AI",
+  "scic_accuracy_status": "PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY",
   "quote_as_scic_accuracy": false,
   "kernel_emitted": 0,
-  "note": "quote_as_scic_accuracy is true only for isolated Nsight DRAM (status NSIGHT_DRAM). A process-sum Nsight capture and a torch profiler memory estimate still produce rates so the next run has a number to inspect; do not put those rates in the paper as SCIC accuracy. The ridge is still the datasheet ridge."
+  "note": "quote_as_scic_accuracy is true only for isolated Nsight DRAM (status NSIGHT_DRAM). A process-sum Nsight capture, a torch profiler memory estimate, and a caching-allocator delta still produce rates so the next run has a number to inspect; do not put those rates in the paper as SCIC accuracy. The ridge is still the datasheet ridge."
 }

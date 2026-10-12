@@ -1,0 +1,5 @@
+TRY_NSIGHT=1 was set and ncu was on PATH, but scripts/nsight_dram.sh failed.
+achieved_ai was not filled. See the script output above.
+Check: ncu --query-metrics | grep dram__bytes
+Override metric names with NCU_METRICS.
+torch.profiler memory is not DRAM bytes.

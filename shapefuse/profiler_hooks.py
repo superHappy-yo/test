@@ -112,7 +112,9 @@ def profile_matmul_memory(m: int, n: int, k: int, cuda: bool) -> dict:
     Nsight status. PyTorch 2.5 records that allocator delta on
     ``self_device_memory_usage``. Reading only the deprecated
     ``self_cuda_memory_usage`` name yields zeros on ``key_averages()`` and
-    was reported as ``TORCH_PROFILER_EMPTY`` on the A40 package.
+    was reported as ``TORCH_PROFILER_EMPTY`` on the second A40 package.
+    The third package filled this field; those counts matched the output
+    matrix and stayed ``TORCH_PROFILER_MEMORY_NOT_DRAM``.
 
     If profiler events are still empty, a positive caching-allocator delta
     is returned with status ``TORCH_ALLOCATOR_DELTA_NOT_DRAM``. That delta
@@ -242,7 +244,7 @@ def bytes_from_profiler_events(events, cuda: bool) -> tuple[int | None, str]:
     PyTorch 2.5 ``key_averages()`` exposes ``self_device_memory_usage`` and
     does not define ``self_cuda_memory_usage`` (that name remains only as a
     deprecated alias on the un-averaged event). Missing the new field is what
-    made the A40 run record ``TORCH_PROFILER_EMPTY``.
+    made the second A40 run record ``TORCH_PROFILER_EMPTY``.
     """
     self_names = (
         ("self_device_memory_usage", "self_cuda_memory_usage", "self_privateuse1_memory_usage")

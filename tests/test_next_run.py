@@ -274,16 +274,29 @@ class NextRunTests(unittest.TestCase):
         self.assertTrue(payload["do_not_write_measured_ridge_flops_per_byte"])
 
     def test_run_a40_script_recommends_nsight_and_documents_missing_ncu(self) -> None:
-        script = Path(__file__).resolve().parents[1].joinpath("scripts", "run_a40.sh").read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        script = (root / "scripts" / "run_a40.sh").read_text(encoding="utf-8")
         self.assertIn("TRY_NSIGHT=1", script)
         self.assertIn("ncu: NOT on PATH", script)
         self.assertIn("nsight_skipped.txt", script)
         self.assertIn("Nsight Compute", script)
         self.assertIn("bandwidth_estimate.json", script)
-        probe = Path(__file__).resolve().parents[1].joinpath("scripts", "bandwidth_probe.sh").read_text(encoding="utf-8")
+        self.assertIn("ERR_NVGPUCTRPERM", script)
+        self.assertIn("docs/NSIGHT_PERMISSIONS.md", script)
+        probe = (root / "scripts" / "bandwidth_probe.sh").read_text(encoding="utf-8")
         self.assertIn("ESTIMATE_COPY_NOT_NSIGHT", probe)
+        nsight = (root / "scripts" / "nsight_dram.sh").read_text(encoding="utf-8")
+        self.assertIn("ERR_NVGPUCTRPERM", nsight)
+        self.assertIn("docs/NSIGHT_PERMISSIONS.md", nsight)
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("docs/NSIGHT_PERMISSIONS.md", readme)
+        perms = (root / "docs" / "NSIGHT_PERMISSIONS.md").read_text(encoding="utf-8")
+        self.assertIn("NVreg_RestrictProfilingToAdminUsers=0", perms)
+        self.assertIn("modprobe nvidia", perms)
+        self.assertIn("/etc/modprobe.d/", perms)
+        self.assertIn("ERR_NVGPUCTRPERM", perms)
 
-    def test_paper_quotes_second_a40_package(self) -> None:
+    def test_paper_quotes_third_a40_package(self) -> None:
         import csv
 
         root = Path(__file__).resolve().parents[1]
@@ -294,26 +307,57 @@ class NextRunTests(unittest.TestCase):
         for row in rows:
             self.assertIn(row["achieved_tflops"], draft)
             self.assertIn(row["achieved_tflops"], zh)
-            self.assertEqual(row["proxy_ai_status"], "TORCH_PROFILER_EMPTY")
+            self.assertEqual(row["proxy_ai_status"], "TORCH_PROFILER_MEMORY_NOT_DRAM")
+            self.assertEqual(row["proxy_ai"], "4096")
+            self.assertEqual(row["achieved_ai_status"], "TBD_NSIGHT")
             self.assertEqual(row["requested_machine"], "A40_FP16")
         summary = json.loads((root / "paper" / "data" / "a40" / "summary.json").read_text(encoding="utf-8"))
         self.assertEqual(summary["machine"], "A40_FP16")
         self.assertEqual(summary["gpu_measurement_status"], "PARTIAL_VENDOR_MATMUL")
+        self.assertEqual(summary["bench"]["device_name"], "NVIDIA A40")
         self.assertEqual(summary["bench"]["nsight_status"], "TBD_RUN_PROFILER")
+        self.assertIsNone(summary["bench"]["measured_ridge_flops_per_byte"])
         self.assertFalse(summary["decision_agreement"]["quote_as_scic_accuracy"])
-        self.assertEqual(summary["decision_agreement"]["scic_accuracy_status"], "TBD_NO_MEASURED_AI")
+        self.assertEqual(
+            summary["decision_agreement"]["scic_accuracy_status"],
+            "PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY",
+        )
+        self.assertTrue(summary["fusion_proxy"]["triton_used"])
+        self.assertFalse(summary["fusion_proxy"]["claims_memmode_kernel"])
+        bandwidth = json.loads((root / "paper" / "data" / "a40" / "bandwidth_estimate.json").read_text(encoding="utf-8"))
+        self.assertEqual(bandwidth["status"], "ESTIMATE_COPY_NOT_NSIGHT")
+        self.assertIsNone(bandwidth["measured_ridge_flops_per_byte"])
         self.assertIn("PROXY_TIMING_NOT_A_FUSION_SPEEDUP", draft)
-        self.assertIn("NameError('tl is not defined')", draft)
+        self.assertIn("TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION", draft)
+        self.assertIn("TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION", zh)
+        self.assertIn("ERR_NVGPUCTRPERM", draft)
+        self.assertIn("ERR_NVGPUCTRPERM", zh)
+        self.assertIn("docs/NSIGHT_PERMISSIONS.md", draft)
         self.assertIn("TRY_NSIGHT=1", draft)
         self.assertIn("ESTIMATE_COPY_NOT_NSIGHT", draft)
-        fraction = "0.7683067910328436"
-        self.assertIn(fraction, draft)
-        self.assertIn(fraction, zh)
+        fraction = "0.7707526341271441"
+        rate = "0.2857142857142857"
+        ridge = "262.5846181025793"
+        gbps = "570.1019392595165"
+        for needle in (fraction, rate, ridge, gbps):
+            self.assertIn(needle, draft)
+            self.assertIn(needle, zh)
+        self.assertIn("not SCIC accuracy", draft)
+        self.assertIn("不是 SCIC 准确率", zh)
+        self.assertNotIn("SCIC accuracy is 0.2857142857142857", draft)
+        self.assertNotIn("SCIC 准确率是 0.2857142857142857", zh)
+        self.assertNotIn("measured ridge of 262.5846181025793", draft)
         crossings = json.loads((root / "paper" / "data" / "a40" / "crossings.json").read_text(encoding="utf-8"))
         star = "240.32584259093773"
         self.assertEqual(crossings["A40_FP16"]["M_star_AI_equals_ridge"], float(star))
+        self.assertEqual(summary["crossings"]["A40_FP16"]["M_star_AI_equals_ridge"], float(star))
         self.assertIn(star, draft)
         self.assertIn(star, zh)
+        skipped = (root / "paper" / "data" / "a40" / "nsight_skipped.txt").read_text(encoding="utf-8")
+        error = (root / "paper" / "data" / "a40" / "nsight_error.log").read_text(encoding="utf-8")
+        self.assertIn("TRY_NSIGHT=1", skipped)
+        self.assertIn("ncu was on PATH", skipped)
+        self.assertIn("ERR_NVGPUCTRPERM", error)
 
     def test_cli_ingests_nsight_json_on_cpu_timing(self) -> None:
         import tempfile

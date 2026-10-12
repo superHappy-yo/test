@@ -31,7 +31,9 @@ from shapefuse.bench import BenchContext
 # Triton evaluates ``tl.constexpr`` against the kernel function's module
 # globals, not the locals of the function that happens to import it. A
 # function-local ``import triton.language as tl`` raises
-# ``NameError: tl is not defined`` at the annotation (the A40 fusion proxy).
+# ``NameError: tl is not defined`` at the annotation (the second A40 fusion
+# proxy). The third package's bias+GELU rows launched; they are still an
+# elementwise stub, not a fused GEMM.
 try:
     import triton
     import triton.language as tl

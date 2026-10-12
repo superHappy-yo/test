@@ -1,10 +1,10 @@
 # Shape-Conditioned Intensity Classification for Plan-Polymorphic Operator Fusion
 
 **Target venues:** MLSys or ASPLOS.
-**Status:** draft. Analytical results are produced by this repository. The second NVIDIA A40 package is archived under `paper/data/a40/` (`PARTIAL_VENDOR_MATMUL`, `--machine A40_FP16`, datasheet ridge ≈ 215.09, M\* ≈ 240.3). It times `torch.matmul` and a fusion proxy. Nsight DRAM bytes were not captured (`nsight_status` `TBD_RUN_PROFILER`). `quote_as_scic_accuracy` is false. Fused MemMode/ComputeMode kernels and a measured ridge are not in that run.
+**Status:** draft. Analytical results are produced by this repository. The third NVIDIA A40 package is archived under `paper/data/a40/` (`PARTIAL_VENDOR_MATMUL`, `--machine A40_FP16`, datasheet ridge ≈ 215.09, M\* ≈ 240.3). It times `torch.matmul`, a fusion proxy, and a copy-kernel bandwidth estimate. `TRY_NSIGHT=1` found `ncu` on `PATH`; `ncu` then failed with `ERR_NVGPUCTRPERM` (`nsight_error.log`, `nsight_skipped.txt`). `achieved_ai` is still empty. `proxy_ai` is `TORCH_PROFILER_MEMORY_NOT_DRAM` (`quote_as_scic_accuracy` false). The copy-kernel file is `ESTIMATE_COPY_NOT_NSIGHT`; `measured_ridge_flops_per_byte` is null. Fused MemMode/ComputeMode kernels are not in that run.
 **Authors:** TBD.
 
-> Remaining **TBD** markers are empty on purpose. Do not fill them with datasheet arithmetic, with the CPU proxy, with `proxy_ai`, or by relabeling the A40 `torch.matmul` sweep or `fusion_proxy.csv` as a fused-kernel result. This package's three-way regime column uses the A40 FP16 datasheet because the run passed `--machine A40_FP16`. That ridge was not measured on the card. Nsight is still missing.
+> Remaining **TBD** markers are empty on purpose. Do not fill them with datasheet arithmetic, with the CPU proxy, with `proxy_ai`, with the copy-kernel estimate, or by relabeling the A40 `torch.matmul` sweep or `fusion_proxy.csv` as a fused-kernel result. This package's three-way regime column uses the A40 FP16 datasheet because the run passed `--machine A40_FP16`. That ridge was not measured on the card. Nsight DRAM bytes are still missing: the third run's `ncu` was blocked by `ERR_NVGPUCTRPERM`.
 
 ## Abstract
 
@@ -12,7 +12,7 @@ Whether a tensor operator is compute-bound or memory-bound is a function of shap
 
 Fusion that is decided once per operator kind cannot track that crossing. We describe a shape-conditioned intensity classifier (SCIC) that places each producer–consumer site on the Roofline before scheduling, and a dual-plan policy that emits a memory-oriented plan (MemMode), a compute-oriented plan (ComputeMode), or both when the site sits in a band around the ridge. Relative to joint MatMul–epilogue fusion, the added mechanism is the classification and the switch. We do not implement Stage-Stream, and we do not claim it.
 
-The classifier, the plan table, and the closed-form figures are analytical. One NVIDIA A40 run (`--machine A40_FP16`) times stock `torch.matmul` at seven shapes (`PARTIAL_VENDOR_MATMUL` in §7.2). The largest rate in that CSV is 115.0155266 TFLOP/s, and `fraction_of_requested_datasheet_peak` is 0.7683067910328436 (about 76.8% of the A40 datasheet dense FP16 peak, 149.7). That fraction is not a measured ridge. A fusion proxy ran; its time ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`, not a fused-kernel speedup. Nsight byte counts, a measured ridge, MemMode versus ComputeMode, and end-to-end tokens/s are **TBD**.
+The classifier, the plan table, and the closed-form figures are analytical. The third NVIDIA A40 package (`--machine A40_FP16`) times stock `torch.matmul` at seven shapes (`PARTIAL_VENDOR_MATMUL` in §7.2). The largest rate in that CSV is 115.3816693 TFLOP/s, and `fraction_of_requested_datasheet_peak` is 0.7707526341271441 (about 77.1% of the A40 datasheet dense FP16 peak, 149.7). That fraction is not a measured ridge. A fusion proxy ran, including a Triton bias+GELU elementwise stub (`TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`); its time ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`. Nsight failed with `ERR_NVGPUCTRPERM`, so achieved AI, a measured ridge, MemMode versus ComputeMode, and end-to-end tokens/s are **TBD**.
 
 ## 1. Introduction
 
@@ -116,7 +116,7 @@ which for FP16 is the note's formula \(M^\star = Rd/(d - 2R)\). For \(d = 4096\)
 | A40 FP16 | 113.5 | 240.3 | 544.6 |
 | H100 FP8 | 159.2 | 345.2 | 830.2 |
 
-The A40 row is the same closed form on the A40 datasheet preset (`--machine a40`). The second uploaded `crossings.json` was produced with `--machine A40_FP16` and stores that row: ridge 215.08620689655172, M at 0.5 R = 113.50330752177987, M\* = 240.32584259093773, M at 2 R = 544.5531470469126. Those are datasheet crossings, not a measured A40 ridge.
+The A40 row is the same closed form on the A40 datasheet preset (`--machine a40`). The third package's `summary.json`, and the archived `crossings.json` that matches it, were produced with `--machine A40_FP16` and store that row: ridge 215.08620689655172, M at 0.5 R = 113.50330752177987, M\* = 240.32584259093773, M at 2 R = 544.5531470469126. Those are datasheet crossings, not a measured A40 ridge.
 
 FP8 doubles both the Tensor-Core peak and the AI of an all-FP8 GEMM (half the bytes), so \(M^\star\) barely moves. Quantizing only the weights, while leaving the FP16 peak in place, does move AI; it does not by itself lift decode. At M = 1, N = K = 4096, FP16 AI is 1.00 and W8A8 with an FP16 store is still ≈ 2.0, both memory-bound against R ≈ 295. The mixed-dtype rows are a byte what-if: an INT8 Tensor-Core peak is not the FP16 ridge.
 
@@ -136,7 +136,7 @@ FP8 doubles both the Tensor-Core peak and the AI of an all-FP8 GEMM (half the by
 
 For a uniform dtype, AI is unchanged if N and K are swapped, so the expert rows match both \([t, H]\times[H, I]\) and the \((M, N, K)\) order stored in `gemm_shapes.csv`. A linear layer is not "a compute kernel." Decode and prefill of that layer are different regimes on the same GPU.
 
-On the seven shapes timed in §7.2, `regime_vs_h100_datasheet` and `regime_vs_requested_datasheet` agree: memory-bound at M ∈ {1, 4, 32}, ridge-region at M ∈ {344, 512}, compute-bound at M ∈ {2048, 4096}. The strict knee does not. Analytical AI at M = 344 is 294.5284281, just below the H100 ridge (295.22) and above the A40 datasheet ridge (215.08620689655172). `decision_log.csv` records `analytical_roofline_limit=compute` for `near_mstar` under `A40_FP16`, with `analytical_emit_both=true` because the three-way band is still ridge-region. Neither column is a measured ridge.
+On the seven shapes timed in §7.2, `regime_vs_h100_datasheet` and `regime_vs_requested_datasheet` agree: memory-bound at M ∈ {1, 4, 32}, ridge-region at M ∈ {344, 512}, compute-bound at M ∈ {2048, 4096}. The strict knee does not. Analytical AI at M = 344 is 294.5284281, just below the H100 ridge (295.22) and above the A40 datasheet ridge (215.08620689655172), so the three-way band is ridge-region while the strict Roofline limit is compute. Neither column is a measured ridge. The third upload did not include `decision_log.csv`. `agreement.json` summarizes a torch-profiler byte AI and is not SCIC accuracy (§7.2).
 
 ### 3.2 Attention
 
@@ -246,7 +246,7 @@ The feature is queryable at compile time for concrete shapes and at runtime for 
 > **TBD:** fraction of fusion decisions that flip when the regime is taken from the measurement instead of the formula.
 > **TBD:** the sites where the cold-cache bound is most wrong (L2-resident weights, causal masks, paged KV).
 
-The hook is `classify_site(..., measured_ai=...)`. The second A40 bundle leaves `achieved_ai` empty and `proxy_ai` empty (`TORCH_PROFILER_EMPTY`), so this draft still has no measured-AI accuracy to report. Archived `agreement.json` has `scic_accuracy_status=TBD_NO_MEASURED_AI`, `quote_as_scic_accuracy=false`, `n_with_byte_ai=0`, and `n_torch_profiler_memory=0`. `quote_as_scic_accuracy` is true only when byte AI comes from isolated Nsight DRAM (`NSIGHT_DRAM`). A process-sum Nsight capture, a `torch.profiler` memory estimate, and a caching-allocator delta produce rates for inspection and are marked not valid as that accuracy number.
+The hook is `classify_site(..., measured_ai=...)`. The third A40 bundle leaves `achieved_ai` empty (`achieved_ai_status=TBD_NSIGHT`). `proxy_ai` is filled from `torch.profiler` and stuck at 4096 on every bench row, with status `TORCH_PROFILER_MEMORY_NOT_DRAM`. Archived `agreement.json` has `scic_accuracy_status=PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`, `quote_as_scic_accuracy=false`, `n_with_byte_ai=7`, `n_torch_profiler_memory=7`, `n_nsight_dram_isolated=0`, and both inspection rates equal to 0.2857142857142857 (`n_decision_flips_any_byte_source=5`). Do not quote 0.2857142857142857 as SCIC accuracy. `quote_as_scic_accuracy` is true only when byte AI comes from isolated Nsight DRAM (`NSIGHT_DRAM`). A process-sum Nsight capture, a `torch.profiler` memory estimate, and a caching-allocator delta produce rates for inspection and are marked not valid as that accuracy number.
 
 ## 5. Dual-plan selection
 
@@ -279,7 +279,7 @@ Joint MatMul–epilogue fusion answers "can these ops share a kernel." SCIC plus
 | Write attention scores? | a joint schedule can lose to an IO-aware kernel | neither plan writes them; the mode selects tiles and extra epilogue |
 | One template for every expert? | typical grouped-GEMM epilogue | per-expert regime; heterogeneous plans in one layer |
 | Stage-Stream | their mechanism for the joint schedule | not used, not claimed, not implemented |
-| Evidence in this draft | — | closed-form AI, a decision table, one A40 `torch.matmul` curve, and a fusion proxy whose ratios are not fusion speedups (§7.2). Fused-kernel time **TBD** |
+| Evidence in this draft | — | closed-form AI, a decision table, the third A40 `torch.matmul` curve, a copy-kernel bandwidth estimate (`ESTIMATE_COPY_NOT_NSIGHT`), and a fusion proxy whose ratios are not fusion speedups (§7.2). Fused-kernel time **TBD** |
 
 We expect the head-to-head to be interesting only in the ridge band and on the attention epilogue, where the two policies disagree. Far into the memory side both policies fuse. Far into the compute side the dual plan refuses a fusion that joint fusion might still attempt. That disagreement is the experiment. It has not been run.
 
@@ -297,17 +297,25 @@ bash scripts/run_cpu.sh
 
 CPU and NumPy timers from `scripts/run_cpu.sh` are `PLACEHOLDER_NO_GPU`. They are not in the table below.
 
-### 7.2 NVIDIA A40, second package (`PARTIAL_VENDOR_MATMUL`)
+### 7.2 NVIDIA A40, third package (`PARTIAL_VENDOR_MATMUL`)
 
-Archived into `paper/data/a40/` (`bench_gemm.csv`, `summary.json`, `gpu_measurements.json`, `crossings.json`, `decision_log.csv`, `agreement.json`, `fusion_proxy.csv`). The recorded command is:
+Archived into `paper/data/a40/` (`bench_gemm.csv`, `summary.json`, `gpu_measurements.json`, `crossings.json`, `agreement.json`, `fusion_proxy.csv`, `bandwidth_estimate.json`, `nsight_skipped.txt`, `nsight_error.log`). This upload did not include `decision_log.csv`. The matmul command recorded in `summary.json` is:
 
 ```text
 /root/test/shapefuse/__main__.py all --out /root/test/results/a40 --device cuda --require-cuda --bench-level a40 --machine A40_FP16 --profile torch --fusion-proxy
 ```
 
-Environment, from `summary.json`: device NVIDIA A40, PyTorch 2.5.1+cu121, CUDA 12.1, Python 3.10.12. `--machine A40_FP16` selects the A40 datasheet anchor (ridge 215.08620689655172 FLOP/byte, dense FP16 Tensor Core 149.7 TFLOP/s, GDDR6 696 GB/s). `crossings.json` includes `A40_FP16` with M(0.5 R) = 113.50330752177987, M\* = 240.32584259093773, M(2 R) = 544.5531470469126. `--bench-level a40` is the seven shapes with N = K = 4096.
+`nsight_skipped.txt` records that `TRY_NSIGHT=1` was set and `ncu` was on `PATH`, and that `scripts/nsight_dram.sh` failed. `nsight_error.log` is:
 
-`gpu_measurement_status` is `PARTIAL_VENDOR_MATMUL`. `bench.nsight_status` is `TBD_RUN_PROFILER`. `nsight_rows_filled` is 0. `nsight_dram_bytes` and `achieved_ai` are empty on every row (`achieved_ai_status=TBD_NSIGHT`). Every row has `proxy_ai_status=TORCH_PROFILER_EMPTY`, so `proxy_ai` is empty too. `agreement.json` reports `n_shapes=7`, `n_with_byte_ai=0`, `n_torch_profiler_memory=0`, `scic_accuracy_status=TBD_NO_MEASURED_AI`, `quote_as_scic_accuracy=false`. `kernel_emitted` is 0. No MemMode or ComputeMode kernel ran.
+```text
+==PROF== Connected to process 30939 (/usr/bin/python3.10)
+==ERROR== ERR_NVGPUCTRPERM - The user does not have permission to access NVIDIA GPU Performance Counters on the target device 0. For instructions on enabling permissions and to get more information see https://developer.nvidia.com/ERR_NVGPUCTRPERM
+==PROF== Disconnected from process 30939
+```
+
+Environment, from `summary.json`: device NVIDIA A40, PyTorch 2.5.1+cu121, CUDA 12.1, Python 3.10.12. `--machine A40_FP16` selects the A40 datasheet anchor (ridge 215.08620689655172 FLOP/byte, dense FP16 Tensor Core 149.7 TFLOP/s, GDDR6 696 GB/s). `summary.json` and `crossings.json` include `A40_FP16` with M(0.5 R) = 113.50330752177987, M\* = 240.32584259093773, M(2 R) = 544.5531470469126. `--bench-level a40` is the seven shapes with N = K = 4096.
+
+`gpu_measurement_status` is `PARTIAL_VENDOR_MATMUL`. `bench.nsight_status` is still `TBD_RUN_PROFILER` because no `nsight_dram.json` was ingested. `nsight_rows_filled` is 0. `nsight_dram_bytes` and `achieved_ai` are empty on every row (`achieved_ai_status=TBD_NSIGHT`). `kernel_emitted` is 0. No MemMode or ComputeMode kernel ran.
 
 #### Vendor matmul curve
 
@@ -315,25 +323,23 @@ What was timed: stock `torch.matmul`, requested dtype FP16. Every row has `kerne
 
 | label | M | median_s | achieved TFLOP/s | analytical AI | vs A40 datasheet | vs H100 datasheet |
 | --- | --- | --- | --- | --- | --- | --- |
-| decode_gemv | 1 | 7.160000131e-05 | 0.4686373099 | 0.9995 | memory-bound | memory-bound |
-| micro_batch | 4 | 7.948799804e-05 | 1.688528222 | 3.992 | memory-bound | memory-bound |
-| decode_batch32 | 32 | 7.948800176e-05 | 13.50822514 | 31.51 | memory-bound | memory-bound |
-| near_mstar | 344 | 0.000143648006 | 80.35422786 | 294.5 | ridge-region | ridge-region |
-| ridge_m512 | 512 | 0.0001795520037 | 95.68185721 | 409.6 | ridge-region | ridge-region |
-| prefill_m2048 | 2048 | 0.0006596159935 | 104.1810347 | 1024 | compute-bound | compute-bound |
-| square_large | 4096 | 0.001194959998 | 115.0155266 | 1365 | compute-bound | compute-bound |
+| decode_gemv | 1 | 7.072000206e-05 | 0.4744687645 | 0.9995 | memory-bound | memory-bound |
+| micro_batch | 4 | 7.864000276e-05 | 1.706736054 | 3.992 | memory-bound | memory-bound |
+| decode_batch32 | 32 | 7.822399959e-05 | 13.7265012 | 31.51 | memory-bound | memory-bound |
+| near_mstar | 344 | 0.000141967997 | 81.30511704 | 294.5 | ridge-region | ridge-region |
+| ridge_m512 | 512 | 0.0001788479984 | 96.05849291 | 409.6 | ridge-region | ridge-region |
+| prefill_m2048 | 2048 | 0.0006588959992 | 104.2948763 | 1024 | compute-bound | compute-bound |
+| square_large | 4096 | 0.00119116801 | 115.3816693 | 1365 | compute-bound | compute-bound |
 
-`summary.json` records `achieved_tflops_max` as 115.01552661761667 and `fraction_of_requested_datasheet_peak` as 0.7683067910328436. That is this maximum divided by the A40 datasheet peak 149.7, about 76.8% of that datasheet number. `fraction_of_h100_fp16_datasheet_peak` is 0.11629476907746883, the same rate over the H100 datasheet 989. `measured_hbm_bandwidth_bytes_per_s` and `measured_ridge_flops_per_byte` are null.
+`summary.json` records `achieved_tflops_max` as 115.38166932883347 and `fraction_of_requested_datasheet_peak` as 0.7707526341271441. That is this maximum divided by the A40 datasheet peak 149.7, about 77.1% of that datasheet number. `fraction_of_h100_fp16_datasheet_peak` is 0.11666498415453333, the same rate over the H100 datasheet 989. `measured_hbm_bandwidth_bytes_per_s` and `measured_ridge_flops_per_byte` are null.
 
-`decision_log.csv` on the A40 datasheet ridge, with no byte AI: M ∈ {1, 4, 32} is memory-bound, primary MemMode, `emit_both` false. M ∈ {344, 512} is ridge-region, strict limit compute, primary ComputeMode, `emit_both` true. M ∈ {2048, 4096} is compute-bound, primary ComputeMode, `emit_both` false. `byte_ai_status` is `TBD_NO_MEASURED_AI` on every row.
-
-What the curve supports: achieved TFLOP/s rises from 0.4686373099 at M = 1 through 1.688528222 (M = 4), 13.50822514 (M = 32), 80.35422786 (M = 344), 95.68185721 (M = 512), and 104.1810347 (M = 2048), to 115.0155266 at M = 4096. For M ≤ 32 the median stays near 7.2×10⁻⁵ to 7.9×10⁻⁵ s while FLOPs grow by 32×. That is the launch-dominated end of a vendor matmul. It does not locate a measured ridge, and it does not score SCIC against DRAM bytes.
+What the curve supports: achieved TFLOP/s rises from 0.4744687645 at M = 1 through 1.706736054 (M = 4), 13.7265012 (M = 32), 81.30511704 (M = 344), 96.05849291 (M = 512), and 104.2948763 (M = 2048), to 115.3816693 at M = 4096. For M ≤ 32 the median stays near 7.07×10⁻⁵ to 7.86×10⁻⁵ s while FLOPs grow by 32×. That is the launch-dominated end of a vendor matmul. It does not locate a measured ridge, and it does not score SCIC against DRAM bytes.
 
 What it does not support: a fused-kernel speedup, MemMode versus ComputeMode, Nsight achieved AI, a measured GDDR bandwidth, or an H100 latency.
 
 ![NVIDIA A40 torch.matmul FP16 throughput](fig_a40_torch_matmul_tflops.png)
 
-*Figure. Seven `torch.matmul` rates from the second A40 `bench_gemm.csv`. The dashed line is the A40 datasheet dense FP16 peak (149.7 TFLOP/s), not a measurement. Log scale. Not a fused-plan comparison. Nsight bytes are absent.*
+*Figure. Seven `torch.matmul` rates from the third A40 `bench_gemm.csv`. The dashed line is the A40 datasheet dense FP16 peak (149.7 TFLOP/s), not a measurement. Log scale. Not a fused-plan comparison. Nsight bytes are absent (`ERR_NVGPUCTRPERM`).*
 
 No H100 matmul has been run. Those cells stay empty:
 
@@ -345,54 +351,65 @@ No H100 matmul has been run. Those cells stay empty:
 | 2048×4096×4096 | TBD | TBD | TBD | TBD |
 | 4096×4096×4096 | TBD | TBD | TBD | TBD |
 
+#### Profiler bytes are not achieved AI
+
+Every bench row has `proxy_byte_source=key_averages.self_device_memory_usage`, `proxy_ai_status=TORCH_PROFILER_MEMORY_NOT_DRAM`, and `proxy_ai=4096`. The byte counts are 8192, 32768, 262144, 2818048, 4194304, 16777216, and 33554432. Those equal the FP16 output matrix alone (`M × 4096 × 2`). Dividing `2MNK` by that count cancels M and leaves K, so `proxy_ai` is stuck at 4096. An AI of 4096 sits above 2 R on both the A40 and the H100 datasheet bands, so the profiler label is compute-bound on all seven shapes. The analytical labels are compute-bound only at M ∈ {2048, 4096}.
+
+`agreement.json` therefore records `regime_agreement_rate_any_byte_source=0.2857142857142857`, `decision_agreement_rate_any_byte_source=0.2857142857142857`, and `n_decision_flips_any_byte_source=5`. `n_nsight_dram_isolated` and `n_nsight_process_sum` are 0. `scic_accuracy_status` is `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`. `quote_as_scic_accuracy` is false. Do not quote 0.2857142857142857 as SCIC accuracy.
+
+#### Copy-kernel bandwidth (`ESTIMATE_COPY_NOT_NSIGHT`)
+
+`bandwidth_estimate.json` is present. `status` is `ESTIMATE_COPY_NOT_NSIGHT`. `not_nsight`, `not_a_measured_ridge`, and `do_not_write_measured_ridge_flops_per_byte` are true. The probe timed a device-to-device copy (10 repeats, 268435456 FP16 elements, read plus write, 10737418240 bytes in 0.01883420753479004 s). `estimated_bandwidth_gb_per_s` is 570.1019392595165 (about 570.1 GB/s). `estimated_ridge_flops_per_byte` is 262.5846181025793. The numerator is the datasheet FLOP peak, 149.7 TFLOP/s, divided by that copy bandwidth. `measured_hbm_bandwidth_bytes_per_s` and `measured_ridge_flops_per_byte` are null. This file does not replace the datasheet ridge of 215.08620689655172, and it is not Nsight DRAM.
+
 #### Fusion proxy (`PROXY_NOT_FUSION_SPEEDUP`)
 
-`summary.json` records `fusion_proxy.ran=true`, `status=PROXY_NOT_FUSED_GEMM`, `triton_used=false`, `torch_compile_used=true`, and `claims_memmode_kernel`, `claims_computemode_kernel`, and `claims_stage_stream` all false. The note in that object says not to report the time ratio as a fusion speedup.
+`summary.json` records `fusion_proxy.ran=true`, `status=PROXY_NOT_FUSED_GEMM`, `triton_used=true`, `torch_compile_used=true`, and `claims_memmode_kernel`, `claims_computemode_kernel`, and `claims_stage_stream` all false. The note in that object says not to report the time ratio as a fusion speedup.
 
-Every data row in `fusion_proxy.csv` has `time_ratio_status=PROXY_TIMING_NOT_A_FUSION_SPEEDUP`, `memmode_kernel=false`, `computemode_kernel=false`, and `kernel_emitted=false`. The ratio is unfused-region time divided by this variant's time. It is a proxy timing. It is not a fusion speedup.
+Every data row in `fusion_proxy.csv` has `time_ratio_status=PROXY_TIMING_NOT_A_FUSION_SPEEDUP`, `memmode_kernel=false`, `computemode_kernel=false`, `kernel_emitted=false`, and `ok=true`. The ratio is unfused-region time divided by this variant's time. It is a proxy timing.
 
 matmul + RMSNorm, three variants that did run:
 
 - `unfused_two_regions` (`TWO_KERNEL_BASELINE_NOT_A_FUSED_GEMM`): matmul and RMSNorm timed as two regions and added. Ratio 1 by construction.
-- `eager_chain` (`EAGER_CHAIN_STILL_SEPARATE_OPS`): the same two ops inside one Python region. Eager mode still launches both. CSV ratios: 1.388005185 (M = 1), 1.46125371 (M = 4), 1.42554845 (M = 32), 1.343799918 (M = 344), 1.113447022 (M = 512), 1.013099176 (M = 2048), 1.006475964 (M = 4096).
-- `torch_compile` (`TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED`): `torch.compile` on that chain. This repo does not inspect the graph, so a ratio is not evidence of fusion. CSV ratios: 0.8089665914 (M = 1, slower than the two-region sum), 1.315476276 (M = 4), 1.284950052 (M = 32), 1.184333985 (M = 344), 1.156591259 (M = 512), 1.162509833 (M = 2048), 1.201995369 (M = 4096).
+- `eager_chain` (`EAGER_CHAIN_STILL_SEPARATE_OPS`): the same two ops inside one Python region. Eager mode still launches both. CSV ratios: 1.398085063 (M = 1), 1.328853438 (M = 4), 1.393103491 (M = 32), 1.332332706 (M = 344), 1.143115217 (M = 512), 1.016681221 (M = 2048), 1.012774456 (M = 4096).
+- `torch_compile` (`TORCH_COMPILE_PROXY_FUSION_NOT_VERIFIED`): `torch.compile` on that chain. This repo does not inspect the graph, so a ratio is not evidence of fusion. CSV ratios: 1.378291104 (M = 1), 1.509902163 (M = 4), 1.188235255 (M = 32), 1.201624475 (M = 344), 1.175736637 (M = 512), 1.161318498 (M = 2048), 1.211543482 (M = 4096).
 
 bias + GELU, on an already materialized matrix, not a GEMM fusion:
 
-- `unfused_two_regions` versus `hand_elementwise_stub` (`ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION`). Hand-stub ratios from the CSV: 1.162706454 (M = 1), 1.127369426 (M = 4), 1.149630012 (M = 32), 1.113151956 (M = 344), 1.106452186 (M = 512), 1.018106944 (M = 2048), 1.011971539 (M = 4096).
-- `triton` did not run. All seven rows have `ok=false`, honesty `TRITON_KERNEL_FAILED`, and empty `median_s`. The error text is `NameError('tl is not defined')` at `BLOCK: tl.constexpr`. Triton was importable enough to reach the kernel annotation and then failed. There is no Triton timing in this package.
+- `unfused_two_regions` versus `hand_elementwise_stub` (`ELEMENTWISE_HAND_FUSED_STUB_NOT_GEMM_FUSION`). Hand-stub ratios from the CSV: 1.132994609 (M = 1), 1.117102881 (M = 4), 1.138145736 (M = 32), 1.101210125 (M = 344), 1.107857388 (M = 512), 1.022433835 (M = 2048), 1.013019741 (M = 4096).
+- `triton` ran. All seven rows have `ok=true` and honesty `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`. CSV ratios: 1.993904752 (M = 1), 1.51406735 (M = 4), 1.505031954 (M = 32), 1.557734173 (M = 344), 1.879358184 (M = 512), 4.484666033 (M = 2048), 5.375718689 (M = 4096). `triton_used` is true. The stub is one elementwise kernel on an already materialized matrix. It is not a fused GEMM, and the ratio stays `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`. The previous package's `NameError('tl is not defined')` is not this package's result.
 
 ### 7.3 Next server run
 
-Nsight is still the missing measurement. The next run should pass `TRY_NSIGHT=1`.
+Nsight is still the missing measurement. The third package already passed `TRY_NSIGHT=1` with `ncu` on `PATH`. The capture failed with `ERR_NVGPUCTRPERM`. The next run has to fix that permission, reboot, and pass `TRY_NSIGHT=1` again. Steps for an administrator are in [`docs/NSIGHT_PERMISSIONS.md`](../docs/NSIGHT_PERMISSIONS.md): `modprobe nvidia NVreg_RestrictProfilingToAdminUsers=0`, or the same option in `/etc/modprobe.d/`, then reboot, then verify `ncu`.
 
 ```bash
-# Strongly recommended. DRAM bytes are still TBD.
+# After the permission change and a reboot. DRAM bytes are still TBD.
 TRY_NSIGHT=1 bash scripts/run_a40.sh
 # If PyTorch is already installed:
 TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
 ```
 
-`ncu` is Nsight Compute. It is not the NVIDIA driver and not `nvidia-smi`. If `ncu` is not on `PATH`, `scripts/run_a40.sh` says so, writes `results/a40/nsight_skipped.txt` when `TRY_NSIGHT=1`, and still runs the matmul sweep. `achieved_ai` stays empty. Install Nsight Compute, check `ncu --version`, and list metrics with `ncu --query-metrics | grep dram__bytes` before expecting `nsight_dram.json`.
+`ncu` is Nsight Compute. It is not the NVIDIA driver and not `nvidia-smi`. If `ncu` is not on `PATH`, `scripts/run_a40.sh` says so, writes `results/a40/nsight_skipped.txt` when `TRY_NSIGHT=1`, and still runs the matmul sweep. If `ncu` fails with `ERR_NVGPUCTRPERM`, the script says so, keeps `nsight_error.log`, writes `nsight_skipped.txt`, and points at `docs/NSIGHT_PERMISSIONS.md`. `achieved_ai` stays empty in both cases. Install Nsight Compute when `ncu` is missing, check `ncu --version`, and list metrics with `ncu --query-metrics | grep dram__bytes` before expecting `nsight_dram.json`. A permission error is not fixed by changing `NCU_METRICS`.
 
-The script checks `nvidia-smi` and `torch.cuda.is_available()`, prints the device name, and warns if that name does not contain `A40`. It then runs `--machine A40_FP16`, `--bench-level a40`, `--profile torch`, and `--fusion-proxy`. After the sweep it runs a copy-kernel bandwidth probe (`scripts/bandwidth_probe.sh`, or the same module). That file is `bandwidth_estimate.json` with status `ESTIMATE_COPY_NOT_NSIGHT`. The ridge numerator is the datasheet FLOP peak. It does not fill `measured_ridge_flops_per_byte`.
+The script checks `nvidia-smi` and `torch.cuda.is_available()`, prints the device name, and warns if that name does not contain `A40`. It then runs `--machine A40_FP16`, `--bench-level a40`, `--profile torch`, and `--fusion-proxy`. After the sweep it runs a copy-kernel bandwidth probe (`scripts/bandwidth_probe.sh`, or the same module). That file is `bandwidth_estimate.json` with status `ESTIMATE_COPY_NOT_NSIGHT`. The ridge numerator is the datasheet FLOP peak. It does not fill `measured_ridge_flops_per_byte`. The third package already wrote that estimate (§7.2); another copy does not turn it into a measured ridge.
 
-Code changes relative to the package that produced §7.2, for that next run only (they are not results):
+What this package already showed about the hooks (these are results, with the limits above):
 
-- The Triton bias+GELU stub imports `triton.language as tl` in module scope, which is what `@triton.jit` uses when it evaluates `tl.constexpr`. The archived `NameError` came from a function-local import. The stub is still one elementwise kernel, not a fused GEMM.
-- `torch.profiler` memory is read from `self_device_memory_usage` (PyTorch 2.5's `key_averages()` field). If those events are still empty, a positive caching-allocator delta can fill `proxy_ai` with status `TORCH_ALLOCATOR_DELTA_NOT_DRAM`. `TORCH_PROFILER_EMPTY` remains the status when neither source has bytes. Neither status is DRAM, and neither sets `quote_as_scic_accuracy`.
+- The Triton bias+GELU stub launched. Honesty on those rows is `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`. The stub is still one elementwise kernel, not a fused GEMM.
+- `torch.profiler` memory was read from `self_device_memory_usage`. Every row is `TORCH_PROFILER_MEMORY_NOT_DRAM`, and `proxy_ai` is stuck at 4096 because the counts match the output matrix. That status does not set `quote_as_scic_accuracy`.
 
 Honesty of the outputs:
 
 | file | what it is |
 | --- | --- |
 | `bench_gemm.csv` | `torch.matmul` only. `achieved_ai` stays empty unless `nsight_dram.json` was ingested |
-| `proxy_ai` | FLOPs / allocator bytes. `TORCH_PROFILER_MEMORY_NOT_DRAM` if profiler events fired. `TORCH_ALLOCATOR_DELTA_NOT_DRAM` if only the caching allocator moved. `TORCH_PROFILER_EMPTY` if neither did. Not DRAM |
-| `fusion_proxy.csv` | matmul then RMSNorm, versus an eager chain and `torch.compile` if it runs; bias+GELU as two ops versus one Python expression; Triton elementwise stub if the import and the launch succeed. `time_ratio_status` stays `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`. `memmode_kernel` and `computemode_kernel` are false |
-| `decision_log.csv`, `agreement.json` | analytical SCIC plan versus the regime implied by whatever byte AI exists. `quote_as_scic_accuracy` is false for profiler memory, for the allocator delta, and for `NSIGHT_DRAM_PROCESS_SUM` |
+| `proxy_ai` | FLOPs / allocator bytes. In this package: `TORCH_PROFILER_MEMORY_NOT_DRAM`, value 4096, output-sized counts. `TORCH_ALLOCATOR_DELTA_NOT_DRAM` if only the caching allocator moved. `TORCH_PROFILER_EMPTY` if neither did. Not DRAM |
+| `fusion_proxy.csv` | matmul then RMSNorm, versus an eager chain and `torch.compile`; bias+GELU as two ops versus one Python expression; Triton elementwise stub (`TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION` in this package). `time_ratio_status` stays `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`. `memmode_kernel` and `computemode_kernel` are false |
+| `agreement.json` | inspection rates when a byte AI exists. This package: `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`, rate 0.2857142857142857, `quote_as_scic_accuracy` false. Do not quote that rate as SCIC accuracy |
 | `nsight_dram.json` | only if `TRY_NSIGHT=1` and `ncu` succeeds. Default metrics `dram__bytes_read.sum` + `dram__bytes_write.sum`, summed over the short process. Status `NSIGHT_DRAM_PROCESS_SUM` |
+| `nsight_error.log` | `ncu` stderr when the capture fails. This package: `ERR_NVGPUCTRPERM` |
 | `nsight_skipped.txt` | written when `TRY_NSIGHT=1` but `ncu` is missing or the capture fails |
-| `bandwidth_estimate.json` | copy-kernel estimate. Status `ESTIMATE_COPY_NOT_NSIGHT`. Not Nsight |
+| `bandwidth_estimate.json` | copy-kernel estimate. Status `ESTIMATE_COPY_NOT_NSIGHT`. This package: 570.1019392595165 GB/s, estimated ridge 262.5846181025793. Not a measured ridge |
 
 `scripts/run_h100.sh` is unchanged in default behavior (matmul sweep, profile off, no fusion proxy). `PROFILE=torch FUSION_PROXY=1` opts into the same hooks.
 
@@ -401,12 +418,13 @@ Honesty of the outputs:
 | experiment | status |
 | --- | --- |
 | Analytical AI, regimes, crossings, plan table, figures | done, this repo |
-| A40 `torch.matmul` latency and TFLOP/s across M, A40 datasheet regimes | done, §7.2, `PARTIAL_VENDOR_MATMUL`, `--machine A40_FP16` |
-| A40 fusion proxy (not a fused GEMM) | ran, §7.2. Triton rows failed with `NameError('tl is not defined')`. Ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP` |
+| A40 `torch.matmul` latency and TFLOP/s across M, A40 datasheet regimes | done, §7.2, third package, `PARTIAL_VENDOR_MATMUL`, `--machine A40_FP16` |
+| A40 fusion proxy (not a fused GEMM) | ran, §7.2. Triton bias+GELU rows are `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION` with `ok=true`. Ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP` |
+| A40 copy-kernel bandwidth estimate | written, §7.2, `ESTIMATE_COPY_NOT_NSIGHT`, 570.1019392595165 GB/s, estimated ridge 262.5846181025793. `measured_ridge_flops_per_byte` is null |
 | H100 `torch.matmul` latency and TFLOP/s across M | **TBD**, script is `scripts/run_h100.sh` |
-| Nsight DRAM bytes and achieved AI | **TBD**. `nsight_status` is `TBD_RUN_PROFILER`. Next run: `TRY_NSIGHT=1`. If `ncu` is missing, that is an install gap, not a zero |
-| Measured ridge (peak FLOP/s and memory byte/s on the box) | **TBD**. A copy-kernel file, if the next run writes one, is `ESTIMATE_COPY_NOT_NSIGHT` and is not this row |
-| SCIC accuracy vs isolated Nsight AI | **TBD**. Archived `agreement.json` is `TBD_NO_MEASURED_AI`, `quote_as_scic_accuracy` false |
+| Nsight DRAM bytes and achieved AI | **TBD**. `nsight_status` is `TBD_RUN_PROFILER`. Third run: `TRY_NSIGHT=1`, `ncu` on `PATH`, failed with `ERR_NVGPUCTRPERM`. Next: admin steps in `docs/NSIGHT_PERMISSIONS.md`, reboot, then `TRY_NSIGHT=1` again. The failure is not a measured zero |
+| Measured ridge (peak FLOP/s and memory byte/s on the box) | **TBD**. The copy-kernel file is `ESTIMATE_COPY_NOT_NSIGHT` and is not this row |
+| SCIC accuracy vs isolated Nsight AI | **TBD**. Archived `agreement.json` is `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`, rate 0.2857142857142857, `quote_as_scic_accuracy` false. Do not quote that rate as SCIC accuracy |
 | MemMode vs ComputeMode vs always-fuse vs never-fuse | **TBD** (no such kernels; the fusion proxy is not this row) |
 | Attention: IO-aware mainloop with and without an extra fused epilogue, short S vs long S | **TBD** |
 | MoE skew: per-expert plan vs one template; weights of idle experts loaded or not | **TBD** |
@@ -436,11 +454,13 @@ Honesty of the outputs:
 - Softmax's 5 FLOPs and 3 passes, and RMSNorm's 4 FLOPs, are conventions.
 - Datasheet peaks are not the chip in the rack. FP8's near-invariant M* depends on the peak doubling in step with the byte halving.
 - The dual plan does not model register spills. ComputeMode's refusal to fuse is a policy motivated by the self-attention counterexample, not a spill cost. A joint cost model (AI together with spill and shared-memory pressure) is future work; this draft does not claim one.
-- No MemMode or ComputeMode kernel, no Nsight trace, no tokens/s. The A40 numbers in §7.2 are `torch.matmul` latencies and TFLOP/s, plus fusion-proxy timings that are not fusion speedups. `quote_as_scic_accuracy` is false. The Triton bias+GELU rows in that package failed before producing a time.
+- No MemMode or ComputeMode kernel, and no tokens/s. The third A40 package in §7.2 is `torch.matmul` latency and TFLOP/s, fusion-proxy timings with status `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`, and a copy-kernel bandwidth estimate (`ESTIMATE_COPY_NOT_NSIGHT`, 570.1019392595165 GB/s, estimated ridge 262.5846181025793 from the datasheet FLOP peak divided by that copy bandwidth). `measured_ridge_flops_per_byte` is null. `quote_as_scic_accuracy` is false. The torch-profiler agreement rate 0.2857142857142857 has status `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY` and is not SCIC accuracy.
+- Nsight was blocked by `ERR_NVGPUCTRPERM`. `TRY_NSIGHT=1` found `ncu` on `PATH`, and `ncu` could not read GPU performance counters (`nsight_error.log`). `achieved_ai` is still empty. `nsight_status` remains `TBD_RUN_PROFILER`. The admin steps are in `docs/NSIGHT_PERMISSIONS.md`; after a reboot the same capture is `TRY_NSIGHT=1` again.
+- The Triton bias+GELU rows in this package did launch (`ok=true`, `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`). They are an elementwise stub on an already materialized matrix, not a fused GEMM.
 
 ## 10. Conclusion
 
-On an H100-class Roofline the FP16 square projection of width 4096 changes regime near M\* ≈ 345. The same closed form on the A40 datasheet (149.7 TFLOP/s, 696 GB/s, R ≈ 215.09) puts M\* at 240.32584259093773, and that crossing is in the second A40 `crossings.json`. IO-aware attention changes regime with S while materialized attention does not, and a skewed MoE layer contains both regimes in one forward. Fusion decided by operator kind misses those crossings. SCIC publishes the regime from shape and traffic. The dual plan turns the regime into MemMode, ComputeMode, or both, and it does so without taking ownership of Stage-Stream. The device evidence so far is one A40 `torch.matmul` curve under `--machine A40_FP16` and status `PARTIAL_VENDOR_MATMUL`: throughput rises from 0.4686373099 TFLOP/s at M = 1 to 115.0155266 TFLOP/s at M = 4096, which is 0.7683067910328436 of the A40 datasheet peak and not a measured ridge. The three-way A40 and H100 datasheet bands agree on those seven shapes. Nsight was not captured (`TBD_RUN_PROFILER`), `proxy_ai` is `TORCH_PROFILER_EMPTY`, and `quote_as_scic_accuracy` is false. A fusion proxy ran; its time ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`, and the Triton bias+GELU rows failed with `NameError('tl is not defined')`. Fused-kernel time, a measured ridge, and tokens/s are still **TBD**.
+On an H100-class Roofline the FP16 square projection of width 4096 changes regime near M\* ≈ 345. The same closed form on the A40 datasheet (149.7 TFLOP/s, 696 GB/s, R ≈ 215.09) puts M\* at 240.32584259093773, and that crossing is in the third A40 `summary.json` and `crossings.json`. IO-aware attention changes regime with S while materialized attention does not, and a skewed MoE layer contains both regimes in one forward. Fusion decided by operator kind misses those crossings. SCIC publishes the regime from shape and traffic. The dual plan turns the regime into MemMode, ComputeMode, or both, and it does so without taking ownership of Stage-Stream. The device evidence so far is the third A40 `torch.matmul` curve under `--machine A40_FP16` and status `PARTIAL_VENDOR_MATMUL`: throughput rises from 0.4744687645 TFLOP/s at M = 1 to 115.3816693 TFLOP/s at M = 4096, which is 0.7707526341271441 of the A40 datasheet peak and not a measured ridge. The three-way A40 and H100 datasheet bands agree on those seven shapes. `TRY_NSIGHT=1` found `ncu` and then failed with `ERR_NVGPUCTRPERM`, so `achieved_ai` is still empty (`TBD_RUN_PROFILER`). `proxy_ai` is `TORCH_PROFILER_MEMORY_NOT_DRAM` and stuck at 4096. `quote_as_scic_accuracy` is false; the inspection rate 0.2857142857142857 is `PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY` and is not SCIC accuracy. A copy-kernel estimate is `ESTIMATE_COPY_NOT_NSIGHT` (570.1019392595165 GB/s, estimated ridge 262.5846181025793); `measured_ridge_flops_per_byte` is null. A fusion proxy ran; its time ratios are `PROXY_TIMING_NOT_A_FUSION_SPEEDUP`. The Triton bias+GELU rows are `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION` with `ok=true`, which is an elementwise stub, not a fused GEMM. Fused-kernel time, a measured ridge, and tokens/s are still **TBD**.
 
 ## A. Formulas implemented in `shapefuse.intensity`
 
@@ -469,9 +489,9 @@ Regime: memory if AI < 0.5 R, compute if AI > 2 R, else ridge. Roofline seconds:
 | Quantization what-if | `quant_epilogue.csv` |
 | Elementwise | `ew_chains.csv` |
 | Plan decisions | `dual_plans.csv`, `fig_plan_regions.png` |
-| Device matmul | `bench_gemm.csv`, `gpu_measurements.json`; second A40 archive in `paper/data/a40/`, figure `paper/fig_a40_torch_matmul_tflops.png` |
-| A40 crossings | `crossings.json` key `A40_FP16` in that archive (datasheet, not measured) |
-| Decision log | `decision_log.csv`, `agreement.json` (SCIC accuracy only if `quote_as_scic_accuracy`; the archive is false) |
-| Fusion proxy | `fusion_proxy.csv` (`PROXY_TIMING_NOT_A_FUSION_SPEEDUP`; not MemMode / ComputeMode) |
-| Nsight DRAM | `nsight_dram.json` when `TRY_NSIGHT=1` and `ncu` succeed. Missing `ncu` is `nsight_skipped.txt` |
-| Copy-kernel estimate | `bandwidth_estimate.json`, status `ESTIMATE_COPY_NOT_NSIGHT`, not a measured ridge |
+| Device matmul | `bench_gemm.csv`, `gpu_measurements.json`; third A40 archive in `paper/data/a40/`, figure `paper/fig_a40_torch_matmul_tflops.png` |
+| A40 crossings | `crossings.json` key `A40_FP16` in that archive, matching `summary.json` (datasheet, not measured) |
+| Agreement | `agreement.json` in the third archive. `quote_as_scic_accuracy` is false (`PROXY_TORCH_MEMORY_NOT_VALID_SCIC_ACCURACY`). This upload has no `decision_log.csv` |
+| Fusion proxy | `fusion_proxy.csv` (`PROXY_TIMING_NOT_A_FUSION_SPEEDUP`; Triton rows `TRITON_ELEMENTWISE_STUB_NOT_GEMM_FUSION`; not MemMode / ComputeMode) |
+| Nsight DRAM | `nsight_dram.json` when `TRY_NSIGHT=1` and `ncu` succeed. This package: `nsight_error.log` (`ERR_NVGPUCTRPERM`) and `nsight_skipped.txt`. Admin steps: `docs/NSIGHT_PERMISSIONS.md` |
+| Copy-kernel estimate | `bandwidth_estimate.json`, status `ESTIMATE_COPY_NOT_NSIGHT`, estimated ridge 262.5846181025793, `measured_ridge_flops_per_byte` null |
