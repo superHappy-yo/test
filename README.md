@@ -35,6 +35,38 @@ paper/draft.md        English MLSys/ASPLOS-style draft, with TBD markers
 paper/zh_outline.md   Chinese outline
 notes/draft_report_zh.md
 results/SCHEMA.md     output contract; generated files are gitignored
+scripts/run_baseline_bakeoff.sh   Docker wall-clock bakeoff, no Nsight
+```
+
+## Docker bakeoff (one command, no Nsight)
+
+This is the run to send back. It times MatMul+RMSNorm and an attention microbench on CUDA. SCIC chooses `always_fuse` or `always_unfuse` from the datasheet regime and the choice is logged. It does not run Nsight, does not claim FlashAttention-3, and does not quote a profiler as SCIC accuracy.
+
+```bash
+bash scripts/run_baseline_bakeoff.sh
+# CUDA PyTorch already installed:
+SKIP_INSTALL=1 bash scripts/run_baseline_bakeoff.sh
+# optional:
+SKIP_MAX_AUTOTUNE=1 bash scripts/run_baseline_bakeoff.sh
+SKIP_ATTENTION=1 bash scripts/run_baseline_bakeoff.sh
+```
+
+The script requires `nvidia-smi` and `torch.cuda.is_available()`. It does not install a CUDA wheel. Output: `results/bakeoff/`.
+
+Send that directory back. `results/bakeoff/SEND_BACK.txt` repeats the list:
+
+- `bakeoff_latency.csv` — columns `baseline`, `shape`, `median_ms`, `speedup_vs_eager`, `honesty`
+- `bakeoff_decisions.csv` — regime, MemMode or ComputeMode, `selected_baseline`
+- `bakeoff_summary.json`
+- `nvidia_smi.txt`
+- `torch_version.txt`
+
+Baselines in the CSV: `eager_unfused`, `torch_compile_default`, `torch_compile_max_autotune` (or a skipped/failed honesty flag), `sdpa` on the attention rows, `always_fuse`, `always_unfuse`, `scic_selected`. `scic_selected` copies the median of the path it picked. Leave failed rows empty. Do not invent numbers.
+
+A schema check without a GPU writes placeholders, not a paper table:
+
+```bash
+python -m shapefuse bakeoff --device cpu --level smoke --attention --skip-max-autotune --out results/bakeoff-smoke
 ```
 
 ## Install
@@ -123,7 +155,9 @@ What the new script adds, and what it is not:
 
 ## What to send back for the paper
 
-After `scripts/run_a40.sh` (or the H100 script), send the whole output directory. `SEND_BACK.txt` in that directory repeats the list. Minimum:
+For the Docker bakeoff, send `results/bakeoff/` after `bash scripts/run_baseline_bakeoff.sh`. The list is in the section above and in `results/bakeoff/SEND_BACK.txt`. Do not add Nsight numbers to that directory.
+
+The A40 vendor-curve package is separate. After `scripts/run_a40.sh` (or the H100 script), send that output directory too if you still have it. `SEND_BACK.txt` there repeats the list. Minimum:
 
 - `summary.json`, `gpu_measurements.json`, `bench_gemm.csv`
 - `decision_log.csv`, `agreement.json`, `fusion_proxy.csv`
@@ -194,7 +228,34 @@ print(report.regime, decision.primary.mode, decision.emit_both, decision.kernel_
 - **双计划**：访存侧融合 epilogue、用较小 tile；计算侧保住 MMA 流水、用较大 tile、把重 epilogue 拆出去。落在 ridge 带内则两套都发。
 - 范围不限于 GEMM epilogue：逐元素链、归约、Norm、Softmax、Attention 的 prefill/decode、ragged MoE、量化 epilogue。
 
-相对 ComFuse：对方做的是 MatMul 与 epilogue 的联合融合。这里增加的是按 shape 的强度分类，以及 MemMode / ComputeMode 切换。**Stage-Stream 不是我们的贡献，代码里也没有实现。** 不会生成融合 CUDA kernel。`dual_plans.csv` 里 `kernel_emitted=false`。
+相对 ComFuse：对方做的是 MatMul 与 epilogue 的联合融合。这里增加的是按 shape 的强度分类，以及 MemMode / ComputeMode 切换。**Stage-Stream 不是我们的贡献，代码里也没有实现。** 不会生成融合 CUDA kernel。`dual_plans.csv` 里 `kernel_emitted=false`。也不宣称 FlashAttention-3，也不把 profiler 当成 SCIC 准确率。
+
+## Docker bakeoff（一条命令，无 Nsight）
+
+请跑这一条，并把目录寄回。它在 CUDA 上计 MatMul+RMSNorm，以及可选的 Attention 微基准。SCIC 按数据手册分档在 `always_fuse` 和 `always_unfuse` 之间选择，并写入日志。不跑 Nsight，不宣称 FA-3，不把 profiler 写成准确率。
+
+```bash
+bash scripts/run_baseline_bakeoff.sh
+SKIP_INSTALL=1 bash scripts/run_baseline_bakeoff.sh
+SKIP_MAX_AUTOTUNE=1 bash scripts/run_baseline_bakeoff.sh
+SKIP_ATTENTION=1 bash scripts/run_baseline_bakeoff.sh
+```
+
+需要 `nvidia-smi` 和 CUDA 版 PyTorch。脚本不下载 wheel。产物在 `results/bakeoff/`。
+
+寄回（`results/bakeoff/SEND_BACK.txt` 有同一份清单）：
+
+- `bakeoff_latency.csv`（列：`baseline`、`shape`、`median_ms`、`speedup_vs_eager`、`honesty`）
+- `bakeoff_decisions.csv`
+- `bakeoff_summary.json`
+- `nvidia_smi.txt`
+- `torch_version.txt`
+
+失败的行留空。不要编造数字。没有 GPU 时只能做 schema 检查，状态是 `PLACEHOLDER_NO_GPU`，不能写进论文表：
+
+```bash
+python -m shapefuse bakeoff --device cpu --level smoke --attention --skip-max-autotune --out results/bakeoff-smoke
+```
 
 上表的 H100 / A100 / A40 ridge 是数据手册锚点，不是你这台机器的实测峰值。A40 的 149.7 是密集 FP16（FP16 累加），不用稀疏 299.4。N = K = 4096、FP16、H100 上 AI 等于 ridge 的点是 **M\* ≈ 345**；A40 数据手册上 **M\* ≈ 240**。H100 上 M ≲ 159 为 memory-bound（AI < 0.5 R），M ≳ 830 为 compute-bound（AI > 2 R）。短名字：`--machine a40`、`h100`、`a100`、`h100_fp8`。
 
@@ -256,7 +317,9 @@ TRY_NSIGHT=1 SKIP_INSTALL=1 bash scripts/run_a40.sh
 
 ## 论文需要你寄回的东西
 
-跑完 `scripts/run_a40.sh`（或 H100 脚本）后，把整个输出目录寄回。该目录里的 `SEND_BACK.txt` 有清单。至少包括：
+Docker bakeoff 请寄 `results/bakeoff/`（跑 `bash scripts/run_baseline_bakeoff.sh` 之后）。清单在上面的中文小节和 `results/bakeoff/SEND_BACK.txt`。不要往这个目录里补 Nsight 数字。
+
+A40 vendor 曲线是另一份。跑完 `scripts/run_a40.sh`（或 H100 脚本）后，如果还留着那个目录，也一并寄回。该目录里的 `SEND_BACK.txt` 有清单。至少包括：
 
 - `summary.json`、`gpu_measurements.json`、`bench_gemm.csv`
 - `decision_log.csv`、`agreement.json`、`fusion_proxy.csv`

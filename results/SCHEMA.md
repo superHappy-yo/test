@@ -35,6 +35,9 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 | `nsight_dram.json` | optional, from `scripts/nsight_dram.sh`. Not written by the CLI itself. Strongly recommended via `TRY_NSIGHT=1`. If `ncu` is missing or fails (`ERR_NVGPUCTRPERM` included), `scripts/run_a40.sh` writes `nsight_skipped.txt`. See `docs/NSIGHT_PERMISSIONS.md` |
 | `bandwidth_estimate.json` | optional copy-kernel estimate from `scripts/bandwidth_probe.sh`. Status `ESTIMATE_COPY_NOT_NSIGHT`. Not a measured ridge |
 | `SEND_BACK.txt` | checklist of what to return |
+| `bakeoff_latency.csv` | from `python -m shapefuse bakeoff` or `scripts/run_baseline_bakeoff.sh`. Columns include `baseline`, `shape`, `median_ms`, `speedup_vs_eager`, `honesty`. No Nsight. `quote_as_scic_accuracy` is false. `sdpa` is not FlashAttention-3. `scic_selected` copies another row's median |
+| `bakeoff_decisions.csv` | SCIC regime, MemMode or ComputeMode, and `selected_baseline` (`always_fuse` or `always_unfuse`) |
+| `bakeoff_summary.json` | `BAKEOFF_WALLCLOCK` on CUDA, `PLACEHOLDER_NO_GPU` otherwise. `nsight_used` is false |
 
 ## Fields that stay empty until a human measures them
 
@@ -44,6 +47,7 @@ The CLI creates this directory. Generated CSV, JSON, and PNG files are gitignore
 - `measured_winner` in `dual_plans.csv`
 - MemMode versus ComputeMode kernel time (no such kernel is emitted; `fusion_proxy.csv` does not count)
 - end-to-end tokens/s
-- `quote_as_scic_accuracy` stays false for profiler memory and for `NSIGHT_DRAM_PROCESS_SUM`
+- `quote_as_scic_accuracy` stays false for profiler memory, for `NSIGHT_DRAM_PROCESS_SUM`, and for every bakeoff row
+- bakeoff medians, until `scripts/run_baseline_bakeoff.sh` has actually run on CUDA. Do not invent them. A CPU smoke run is `PLACEHOLDER_NO_GPU`
 
 Confirm profiler metric names on the target driver (`ncu --query-metrics`) before filling DRAM bytes. `ncu` is Nsight Compute, separate from the driver; if it is missing, or if it fails, `scripts/run_a40.sh` writes `nsight_skipped.txt` when `TRY_NSIGHT=1` and leaves `achieved_ai` empty. `ERR_NVGPUCTRPERM` is a performance-counter permission error: see `docs/NSIGHT_PERMISSIONS.md`, reboot, then `TRY_NSIGHT=1` again. Achieved AI is FLOPs divided by measured DRAM bytes, not FLOPs divided by latency. `--machine a40` selects the A40 datasheet preset (149.7 TFLOP/s, 696 GB/s). That preset is not a measured ridge. The archived third A40 package used `--machine A40_FP16`. Its regime column is that datasheet. `ncu` failed with `ERR_NVGPUCTRPERM`, `proxy_ai` is `TORCH_PROFILER_MEMORY_NOT_DRAM`, and `quote_as_scic_accuracy` is false. `bandwidth_estimate.json` in that package is `ESTIMATE_COPY_NOT_NSIGHT` and does not fill `measured_ridge_flops_per_byte`.

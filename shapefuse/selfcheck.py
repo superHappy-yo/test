@@ -12,6 +12,7 @@ from shapefuse.intensity import (
     softmax_scores,
 )
 from shapefuse.machines import A100_SXM80_FP16, A40_FP16, H100_SXM_FP16, H100_SXM_FP8, get_machine
+from shapefuse.plan_paths import BASELINE_ALWAYS_FUSE, BASELINE_ALWAYS_UNFUSE, select_executable_path
 from shapefuse.plans import select_plan
 from shapefuse.scic import Site, classify_site
 
@@ -84,6 +85,14 @@ def assert_invariants() -> None:
         raise AssertionError("long attention should be ComputeMode and keep scores off HBM")
     if d_long.kernel_emitted:
         raise AssertionError("selector must not claim a kernel was emitted")
+    if select_executable_path(select_plan(mem, length=1)) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("memory-bound GEMM must select always_fuse")
+    if select_executable_path(select_plan(comp, length=2048)) != BASELINE_ALWAYS_UNFUSE:
+        raise AssertionError("compute-bound GEMM must select always_unfuse")
+    if select_executable_path(d_short) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError("short attention must select always_fuse (epilogue on SDPA)")
+    if select_executable_path(d_long) != BASELINE_ALWAYS_UNFUSE:
+        raise AssertionError("long attention must select always_unfuse (separate epilogue on SDPA)")
 
 
 def run_selfcheck() -> None:

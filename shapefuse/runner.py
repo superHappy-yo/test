@@ -193,6 +193,8 @@ def _summary(args, bundle: SweepBundle, bench_rows, bench_meta, proxy_rows, agre
         "non_contributions": [
             "Stage-Stream",
             "a new attention algorithm",
+            "claiming FlashAttention-3 kernels",
+            "quoting a profiler or process-sum byte count as SCIC accuracy",
             "emitted CUDA kernels for MemMode or ComputeMode",
         ],
         "gpu_measurement_status": gpu_status,

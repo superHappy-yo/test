@@ -24,8 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
         "cmd",
         nargs="?",
         default="all",
-        choices=("all", "analytical", "bench", "plans", "selfcheck"),
-        help="all = tables + plans + figures + a matmul timing (default)",
+        choices=("all", "analytical", "bench", "plans", "selfcheck", "bakeoff"),
+        help=(
+            "all = tables + plans + figures + a matmul timing (default). "
+            "bakeoff = wall-clock subgraph latency and the SCIC-selected path. "
+            "No Nsight."
+        ),
     )
     parser.add_argument("--out", default="results", help="Output directory")
     parser.add_argument(
@@ -91,6 +95,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Compute band is AI > compute_frac * R",
     )
     parser.add_argument("--skip-plots", action="store_true")
+    parser.add_argument(
+        "--level",
+        default="decode-prefill",
+        choices=("smoke", "decode-prefill"),
+        help=(
+            "Bakeoff shape list. smoke is a CPU schema check. "
+            "decode-prefill is the CUDA MatMul+RMSNorm and attention list."
+        ),
+    )
+    parser.add_argument(
+        "--attention",
+        action="store_true",
+        help="Also time the attention microbench (materialized eager, SDPA, fuse policy).",
+    )
+    parser.add_argument(
+        "--skip-max-autotune",
+        action="store_true",
+        help="Do not try torch.compile mode=max-autotune. The row is marked skipped.",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=None,
+        help="Timed iterations per baseline. Default 10 on CUDA, 2 otherwise.",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=None,
+        help="Warmup iterations per baseline. Default 3 on CUDA, 1 otherwise.",
+    )
     parser.add_argument("--version", action="version", version=f"shapefuse {__version__}")
     return parser
 
@@ -102,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
 
         run_selfcheck()
         return 0
+    if args.cmd == "bakeoff":
+        from shapefuse.bakeoff import main_bakeoff
+
+        return main_bakeoff(args)
     from shapefuse.runner import run_command
 
     return run_command(args)

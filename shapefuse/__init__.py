@@ -30,6 +30,7 @@ from shapefuse.machines import (
     Machine,
     get_machine,
 )
+from shapefuse.plan_paths import select_executable_path
 from shapefuse.plans import Plan, PlanCache, PlanDecision, select_plan
 from shapefuse.scic import IntensityReport, classify_site
 
@@ -56,7 +57,8 @@ __all__ = [
     "get_machine",
     "limiting_resource",
     "roofline_seconds",
+    "select_executable_path",
     "select_plan",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
