@@ -1,0 +1,342 @@
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{xcolor}
+
+\journal{Journal of Systems Architecture}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Shape-Conditioned Intensity Classification for Plan-Polymorphic Operator Fusion in DNN Compiler Pipelines}
+
+\author[inst]{Happy Super}
+\ead{happy.super@example.com}
+
+\affiliation[inst]{organization={Affiliation TBD},
+            addressline={},
+            city={},
+            postcode={},
+            country={}}
+
+\begin{abstract}
+Whether a tensor operator is compute-bound or memory-bound depends on shape, dtype, and which intermediates touch HBM---not on the operator name alone.
+On an H100-class Roofline, a width-4096 FP16 GEMM crosses from arithmetic intensity (AI) $\approx 1$ at decode to AI $\approx 1024$ at prefill; IO-aware attention crosses with sequence length while a score-materializing plan does not; a skewed mixture-of-experts (MoE) layer can hold both regimes in one forward pass.
+Fusion frozen at operator kind cannot follow those crossings.
+
+We present a \emph{shape-conditioned intensity classifier} (SCIC) that labels each producer--consumer site before scheduling, and a \emph{dual-plan} policy that emits MemMode (memory-oriented fusion), ComputeMode (compute-oriented fission), or both in a band around the datasheet ridge.
+Relative to joint MatMul--epilogue fusion, the contribution is classification and runtime plan selection---not custom fused CUDA kernels, Stage-Stream execution, or a new attention algorithm.
+
+The classifier, plan table, and figures in our artifact are analytical.
+Device evidence follows a deliberate pipeline: reproduce closed forms; time stock \texttt{torch.matmul} on an NVIDIA A40 as shape-dependence motivation only; then run Docker wall-clock bakeoffs comparing eager, \texttt{torch.compile}, library \texttt{scaled\_dot\_product\_attention}, and SCIC-selected paths.
+Nsight DRAM bytes failed with \texttt{ERR\_NVGPUCTRPERM}, so achieved AI, a measured ridge, and end-to-end tokens/s remain future work; \texttt{quote\_as\_scic\_accuracy} is false throughout.
+
+Calibrated latency claims use only the idle-GPU bakeoff archive (\texttt{bakeoff\_v4}) with \texttt{--calibrate all-gemm}: seven GEMM decisions from few-shot wall-clock of \texttt{always\_fuse} versus \texttt{always\_unfuse}; five attention decisions from library SDPA with a \texttt{compile\_sdpa\_chain} epilogue policy.
+\end{abstract}
+
+\begin{highlights}
+\item SCIC classifies GEMM, attention, norms, and MoE sites by shape-dependent arithmetic intensity against datasheet Roofline ridges before fusion scheduling.
+\item A dual-plan selector emits MemMode, ComputeMode, or both in a policy band around the ridge, with optional wall-clock calibration of executable GEMM paths.
+\item A library-aware attention epilogue policy times PyTorch SDPA plus RMSNorm under \texttt{torch.compile} even when the analytical primary is ComputeMode.
+\item Docker bakeoffs on NVIDIA A40 document selector evolution; idle-GPU calibrated GEMM closes a datasheet-only miss where \texttt{torch.compile} wins on prefill shapes.
+\item Evaluation is honest about missing Nsight DRAM bytes and absent custom MemMode/ComputeMode kernels; claims are wall-clock subgraph latency plus logged decisions.
+\end{highlights}
+
+\begin{keyword}
+DNN compilers \sep operator fusion \sep Roofline model \sep GPU systems architecture \sep shape polymorphism \sep PyTorch
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+\label{sec:intro}
+
+Compilers for GPU kernels already fuse a matrix multiply with the elementwise and normalization code that consumes it.
+The usual justification is traffic: the product matrix is expensive to write and to read back.
+That justification is incomplete.
+The same multiply is a different machine regime at decode (a handful of rows) and at prefill (thousands of rows).
+A fusion that pays for itself on one side of the ridge can crowd registers and the MMA pipeline on the other.
+Attention makes the gap sharper: FlashAttention-style IO and a score-materializing implementation are not two tunings of one intensity; they are different intensities.
+
+This paper argues for \emph{plan-polymorphic fusion} in systems terms:
+(1)~intensity is shape-dependent for GEMM, attention, and grouped GEMM;
+(2)~a classifier should run before fusion on concrete shape, dtype, and traffic accounting and return a regime rather than a boolean adjacency test;
+(3)~the scheduler should emit two plans for one site when needed and pick at runtime from the regime or from a measured cache keyed by shape bucket.
+
+ComFuse~\cite{Mu2025ComFuse} showed that joint MatMul and epilogue fusion is profitable and reported a self-attention case where the joint schedule loses to an IO-aware kernel---a missing switch, not a reason to abandon fusion.
+We do not re-derive or implement ComFuse's Stage-Stream execution model.
+
+\textbf{Contributions.}
+An analytical SCIC for GEMM, attention (prefill and decode, MHA and GQA), norms, reductions, softmax, elementwise chains, ragged MoE grouped GEMM, and mixed-dtype epilogues, scored against datasheet ridges for H100 FP16/FP8, A100 FP16, and A40 FP16.
+A dual-plan selector (MemMode, ComputeMode, or both) with shape-bucketed plan cache and optional few-shot wall-clock calibration (\texttt{--calibrate all-gemm}).
+A library-aware attention epilogue policy (\texttt{compile\_sdpa\_chain}) for bakeoffs using PyTorch SDPA.
+A correction to byte-fraction intuition for GEMM+RMSNorm fusion under a cold-cache model.
+A reproducible evaluation arc---analytical selfcheck, A40 \texttt{torch.matmul} motivation, and Docker bakeoffs archived under \texttt{paper/data/bakeoff\{,\_v2,\_v4\}/}.
+
+\textbf{Non-contributions.}
+Stage-Stream; new attention kernels; quoting profiler memory as SCIC accuracy; custom MemMode/ComputeMode CUDA kernels; end-to-end tokens/s.
+
+\section{Background}
+\label{sec:background}
+
+\subsection{Roofline}
+\label{sec:roofline}
+
+Following Williams et al.~\cite{Williams2009Roofline}, arithmetic intensity and the machine ridge are
+\begin{equation}
+  \mathrm{AI} = \frac{\mathrm{FLOPs}}{\mathrm{bytes}}, \qquad
+  R = \frac{\mathrm{peak\ FLOP/s}}{\mathrm{peak\ byte/s}}.
+\end{equation}
+We use this model as a classifier feature, not as a latency predictor.
+Table~\ref{tab:ridges} lists datasheet anchors (dense Tensor Core, sparsity off).
+
+\begin{table}[t]
+  \centering
+  \caption{Datasheet Roofline anchors (not measured on evaluation GPUs).}
+  \label{tab:ridges}
+  \begin{tabular}{@{}llrr@{}}
+    \toprule
+    Machine & Peak & Memory & $R$ (FLOP/byte) \\
+    \midrule
+    H100 SXM, FP16 & 989 TFLOP/s & HBM3 3.35 TB/s & 295.22 \\
+    H100 SXM, FP8 & 1979 TFLOP/s & HBM3 3.35 TB/s & 590.75 \\
+    A100 80GB SXM, FP16 & 312 TFLOP/s & HBM2e 2.039 TB/s & 153.02 \\
+    A40, FP16 & 149.7 TFLOP/s & GDDR6 696 GB/s & 215.09 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+SCIC's three-way label is a policy band around the knee: memory-bound if $\mathrm{AI} < 0.5R$; compute-bound if $\mathrm{AI} > 2R$; ridge-region otherwise.
+Inside the band the selector emits both plans because small errors in bytes or in $R$ flip the knee.
+
+\subsection{Fusion modes and traffic}
+\label{sec:fusion-modes}
+
+\textbf{MemMode} fuses the epilogue, avoids writing the intermediate, and prefers smaller tiles.
+\textbf{ComputeMode} does not pull a heavy epilogue into the MMA mainloop, uses larger tiles, and materializes GEMM outputs when appropriate.
+For attention, neither mode materializes the score matrix; modes differ in tile size and whether a further epilogue joins the mainloop.
+Bytes are a cold-HBM lower bound: each live tensor moves once.
+Neither mode corresponds to a kernel emitted in our artifact (\texttt{kernel\_emitted=false}).
+
+\section{Shape-dependent intensity}
+\label{sec:intensity}
+
+\subsection{GEMM}
+For $C=AB$ with shapes $[M,K]$, $[K,N]$, $[M,N]$ and element sizes $e_A,e_B,e_C$,
+$\mathrm{FLOPs}=2MNK$ and $\mathrm{bytes}=MK e_A + KN e_B + MN e_C$.
+For a square projection $N=K=d$ in uniform FP16, $\mathrm{AI}(M)=2Md/((d+2M)e)$.
+Setting AI equal to a target $t$ gives $M^\star = Rd/(d-2R)$ for FP16.
+On A40 FP16 with $d=4096$, $M^\star \approx 240.3$ (datasheet crossing, not measured).
+
+Decode ($M{=}1$) and prefill ($M{=}2048$) of the same linear layer sit in different regimes; expert token counts in MoE create heterogeneous regimes within one layer (Table~\ref{tab:moe} sketches skew).
+
+\subsection{Attention}
+For $Q,K,V$ with shape $[B,H,S,D]$, IO-aware prefill has $\mathrm{AI}=S/e$ (head dimension cancels).
+Materialized scores stay memory-bound at every sequence length for typical head widths on H100-class ridges.
+Decode AI tends to $2H_q/(H_{kv}e)$ as cache length grows---a prefill ``compute-bound attention'' label is misleading for decode.
+
+\subsection{GEMM+RMSNorm byte fraction}
+Fusing RMSNorm saves fraction $2M/(d+4M)$ of unfused bytes in FP16, which \emph{increases} with $M$, while strict Roofline speedup of that fusion stays near $1\times$ when both sides are compute-limited at large $M$.
+
+\begin{table}[t]
+  \centering
+  \caption{MoE grouped GEMM intensity sketch ($H{=}4096$, $I{=}14336$, FP16).}
+  \label{tab:moe}
+  \begin{tabular}{@{}lrrl@{}}
+    \toprule
+    Scenario & Tokens & AI agg. & Regimes \\
+    \midrule
+    Decode, $8{\times}2$ & 16 & 2.00 & memory / memory \\
+    Balanced, $8{\times}256$ & 2048 & 237 & ridge / ridge \\
+    Skewed, $1024\ldots 8$ & 2040 & 236 (min 7.98, max 775) & heterogeneous \\
+    Prefill, $8{\times}2048$ & 16384 & 1247 & compute / compute \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{SCIC}
+\label{sec:scic}
+
+A site is a kind, a shape, and per-tensor dtypes.
+SCIC returns FLOPs, bytes, AI, AI/$R$, three-way regime, and strict Roofline limit.
+The feature is queryable at compile time for concrete shapes and at runtime for bucketed shapes.
+Planned calibration with isolated Nsight DRAM bytes remains future work; A40 runs left \texttt{achieved\_ai} empty and \texttt{proxy\_ai} from \texttt{torch.profiler} is explicitly not SCIC accuracy.
+
+\section{Dual-plan selection}
+\label{sec:dual-plan}
+
+Given a SCIC report, the prototype applies:
+(1)~elementwise chains, reductions, softmax, and norms emit MemMode only;
+(2)~memory-bound $\rightarrow$ MemMode; compute-bound $\rightarrow$ ComputeMode;
+(3)~ridge-region $\rightarrow$ both plans, primary from AI vs.\ $R$;
+(4)~attention never materializes scores; ComputeMode means large tiles and epilogue fission, not score traffic.
+
+For library SDPA bakeoffs, executable attention policy is \texttt{compile\_sdpa\_chain} (\texttt{always\_fuse}) in every regime.
+GEMM ridge and compute shapes can take a few-shot wall-clock probe (\texttt{--calibrate all-gemm}): median of \texttt{always\_fuse} vs.\ \texttt{always\_unfuse}; \texttt{selected\_baseline} follows \texttt{measured\_winner} when present.
+Shape buckets for the plan cache are $1$, $2$--$8$, $9$--$32$, $33$--$128$, $129$--$512$, $513$--$2048$, $2049$--$8192$, $8193+$.
+
+\section{Position relative to joint fusion}
+\label{sec:joint}
+
+Joint MatMul--epilogue fusion asks whether ops can share a kernel; SCIC plus dual plans ask which legal kernel schedule should exist for \emph{this} shape.
+ComFuse~\cite{Mu2025ComFuse}, RedFuser~\cite{Tang2026RedFuser}, and Neptune~\cite{Zhao2026Neptune} emit fused kernels; we stop at regime classification and compiler/library path selection.
+
+\section{Evaluation}
+\label{sec:eval}
+
+Evaluation is layered:
+\textbf{(1)} analytical reproduction via \texttt{python -m shapefuse selfcheck};
+\textbf{(2)} seven-shape A40 \texttt{torch.matmul} motivation (\texttt{PARTIAL\_VENDOR\_MATMUL});
+\textbf{(3)} Docker bakeoff wall-clock without Nsight.
+Calibrated \texttt{scic\_selected} latencies are quoted only from \texttt{paper/data/bakeoff\_v4/} (idle GPU, package 0.3.1).
+
+\subsection{A40 vendor matmul motivation}
+Table~\ref{tab:a40-matmul} shows achieved TFLOP/s rising with $M$ (0.47 at $M{=}1$ to 115.4 at $M{=}4096$, $\approx 77\%$ of A40 datasheet peak)---shape dependence, not MemMode vs.\ ComputeMode.
+
+\begin{table}[t]
+  \centering
+  \caption{A40 \texttt{torch.matmul} FP16 medians (archive \texttt{paper/data/a40/}).}
+  \label{tab:a40-matmul}
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Label & $M$ & median (s) & TFLOP/s & Regime (A40 band) \\
+    \midrule
+    decode\_gemv & 1 & $7.07{\times}10^{-5}$ & 0.47 & memory \\
+    micro\_batch & 4 & $7.86{\times}10^{-5}$ & 1.71 & memory \\
+    decode\_batch32 & 32 & $7.82{\times}10^{-5}$ & 13.7 & memory \\
+    near\_mstar & 344 & $1.42{\times}10^{-4}$ & 81.3 & ridge \\
+    ridge\_m512 & 512 & $1.79{\times}10^{-4}$ & 96.1 & ridge \\
+    prefill\_m2048 & 2048 & $6.59{\times}10^{-4}$ & 104.3 & compute \\
+    square\_large & 4096 & $1.19{\times}10^{-3}$ & 115.4 & compute \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\linewidth]{figures/fig_a40_torch_matmul_tflops.png}
+  \caption{NVIDIA A40 \texttt{torch.matmul} FP16 throughput from \texttt{bench\_gemm.csv}.
+  Dashed line: A40 datasheet dense FP16 peak (149.7 TFLOP/s), not a measurement.
+  Not a fused-plan comparison; Nsight bytes absent (\texttt{ERR\_NVGPUCTRPERM}).}
+  \label{fig:a40-matmul}
+\end{figure}
+
+\subsection{Docker baseline bakeoff}
+Baselines include \texttt{eager\_unfused}, \texttt{torch\_compile\_default}, \texttt{always\_fuse}, \texttt{always\_unfuse}, and \texttt{scic\_selected} (copies the chosen baseline median).
+Three archives trace selector evolution; only \texttt{bakeoff\_v4} used a waited-for idle GPU and GEMM calibration.
+
+\textbf{Attention fix.}
+Pre-fix \texttt{bakeoff/} mapped analytical ComputeMode on prefill $S{\in}\{512,2048\}$ to \texttt{always\_unfuse}, missing the faster compiled SDPA chain.
+\texttt{bakeoff\_v2/} applies \texttt{compile\_sdpa\_chain} on all five attention shapes (busy GPU at 92\% utilization).
+
+\textbf{Calibrated GEMM (\texttt{bakeoff\_v4/}).}
+All five attention rows: \texttt{selection\_source=library\_sdpa}, \texttt{always\_fuse}.
+Seven GEMM rows: \texttt{selection\_source=measured\_wallclock}.
+Decode and ridge $M{\in}\{128,256\}$ select \texttt{always\_unfuse}; ridge $M{=}512$ and prefill $M{\in}\{2048,4096\}$ select \texttt{always\_fuse}---e.g.\ prefill $M{=}2048$ \texttt{scic\_selected} 0.771\,ms (1.134$\times$ vs.\ eager).
+The probe is wall-clock on this machine, not DRAM AI.
+
+\begin{table}[t]
+  \centering
+  \caption{MatMul+RMSNorm, calibrated bakeoff \texttt{bakeoff\_v4} ($N{=}K{=}4096$). Speedup vs.\ eager.}
+  \label{tab:gemm-v4}
+  \small
+  \begin{tabular}{@{}llrrrr@{}}
+    \toprule
+    Label & SCIC & eager (ms) & fuse $\times$ & unfuse $\times$ & scic $\times$ \\
+    \midrule
+    decode\_m1 & unfuse & 0.0875 & 0.763 & 0.994 & 0.994 \\
+    decode\_m32 & unfuse & 0.100 & 0.840 & 0.999 & 0.999 \\
+    ridge\_m128 & unfuse & 0.104 & 0.864 & 0.999 & 0.999 \\
+    ridge\_m256 & unfuse & 0.161 & 0.940 & 1.023 & 1.023 \\
+    ridge\_m512 & fuse & 0.240 & 1.066 & 1.000 & 1.066 \\
+    prefill\_m2048 & fuse & 0.874 & 1.134 & 1.000 & 1.134 \\
+    prefill\_m4096 & fuse & 1.627 & 1.187 & 0.991 & 1.187 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Attention+RMSNorm, \texttt{bakeoff\_v4} (all SCIC rows copy \texttt{always\_fuse}).}
+  \label{tab:attn-v4}
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Label & eager (ms) & fuse $\times$ & unfuse $\times$ & scic $\times$ \\
+    \midrule
+    prefill\_s128 & 0.153 & 1.187 & 1.528 & 1.187 \\
+    prefill\_s512 & 0.157 & 0.920 & 1.456 & 0.920 \\
+    prefill\_s2048 & 1.072 & 5.588 & 5.584 & 5.588 \\
+    decode\_sk128 & 0.150 & 1.122 & 1.489 & 1.122 \\
+    decode\_sk2048 & 0.150 & 0.880 & 1.428 & 0.880 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Nsight DRAM, achieved AI, custom MemMode/ComputeMode kernels, MoE skew under measurement, and tokens/s remain outside the bakeoff (Table~\ref{tab:tbd}).
+
+\begin{table}[t]
+  \centering
+  \caption{Experiment status (summary).}
+  \label{tab:tbd}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    Experiment & Status \\
+    \midrule
+    Analytical AI, plans, figures & Done in repository \\
+    A40 \texttt{torch.matmul} motivation & Done (\S\ref{sec:eval}) \\
+    Bakeoff archives v1/v2/v4 & Archived; v4 idle GPU + GEMM calib. \\
+    Nsight DRAM / SCIC accuracy & \textbf{TBD} (\texttt{ERR\_NVGPUCTRPERM}) \\
+    Custom fused kernels, tokens/s & \textbf{TBD} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Related work}
+\label{sec:related}
+
+\textbf{Roofline}~\cite{Williams2009Roofline} supplies the intensity--ridge picture used as a per-site compiler feature.
+\textbf{IO-aware attention}~\cite{Dao2022FlashAttention}: we treat FA-style plans as existing schedules SCIC can label; bakeoff SDPA rows are PyTorch library paths, not FlashAttention-3 from this repository.
+\textbf{Joint fusion}~\cite{Mu2025ComFuse,Tang2026RedFuser,Zhao2026Neptune}: we cite ComFuse's attention counterexample as motivation for ComputeMode on long sequences without implementing Stage-Stream.
+\textbf{Fusion granularity}~\cite{Lacouture2026FuseFlow} studies sparse streaming targets---orthogonal to dense GPU regime labels.
+\textbf{Compiler stacks}~\cite{Ansel2024PyTorch2}: \texttt{torch.compile} already fuses many sites; dynamic shapes alone did not flip GEMM epilogue choice when datasheet AI said compute-bound while compile still won---motivating measurement feedback.
+
+\section{Limitations}
+\label{sec:limits}
+
+No Nsight and no Docker DRAM AI; \texttt{scic\_selected} copies baseline medians without plan-switch overhead; bakeoffs v1/v2 ran on busy GPUs; cold HBM model omits L2, masks, and paged KV; $0.5R/2R$ band is a knob; datasheet peaks are not measured in-rack peaks; no hand-written MemMode/ComputeMode kernels.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+Shape-dependent intensity crosses decode, prefill, attention sequence length, and MoE skew within one model.
+SCIC publishes the regime from shape and traffic; the dual plan turns it into MemMode, ComputeMode, or both without owning Stage-Stream.
+Device evidence to date is an A40 \texttt{torch.matmul} curve, fusion-proxy timings explicitly not fusion speedups, and Docker bakeoffs that log wall-clock plus decisions.
+The idle-GPU \texttt{bakeoff\_v4} archive closes a GEMM selector gap with few-shot wall-clock calibration while attention stays on \texttt{compile\_sdpa\_chain}.
+Isolated Nsight DRAM bytes, custom fused kernels, and end-to-end serving throughput remain open.
+
+\section*{Data availability}
+Analytical outputs and bakeoff CSVs are archived under \texttt{paper/data/} in the source repository that produced this manuscript.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{references}
+
+\appendix
+\section{Formulas implemented in \texttt{shapefuse.intensity}}
+\label{app:formulas}
+
+GEMM: $\mathrm{AI}=2MNK/(MK e_A + KN e_B + MN e_C)$.
+Square projection: $\mathrm{AI}=2Md/((d+2M)e)$.
+FA-style prefill: $\mathrm{AI}=S/e$.
+Softmax on materialized scores: $\mathrm{AI}=5/(3e)$.
+Regime: memory if $\mathrm{AI}<0.5R$, compute if $\mathrm{AI}>2R$, else ridge.
+Roofline seconds: $\max(\mathrm{FLOPs}/P,\mathrm{bytes}/B)$.
+
+\end{document}
