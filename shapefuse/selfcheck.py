@@ -13,7 +13,7 @@ from shapefuse.intensity import (
 )
 from shapefuse.machines import A100_SXM80_FP16, A40_FP16, H100_SXM_FP16, H100_SXM_FP8, get_machine
 from shapefuse.plan_paths import BASELINE_ALWAYS_FUSE, BASELINE_ALWAYS_UNFUSE, select_executable_path
-from shapefuse.plans import select_plan
+from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, select_plan
 from shapefuse.scic import Site, classify_site
 
 
@@ -91,8 +91,15 @@ def assert_invariants() -> None:
         raise AssertionError("compute-bound GEMM must select always_unfuse")
     if select_executable_path(d_short) != BASELINE_ALWAYS_FUSE:
         raise AssertionError("short attention must select always_fuse (epilogue on SDPA)")
-    if select_executable_path(d_long) != BASELINE_ALWAYS_UNFUSE:
-        raise AssertionError("long attention must select always_unfuse (separate epilogue on SDPA)")
+    if d_long.epilogue_policy != POLICY_COMPILE_SDPA_CHAIN:
+        raise AssertionError("long attention must score compile_sdpa_chain")
+    if select_executable_path(d_long) != BASELINE_ALWAYS_FUSE:
+        raise AssertionError(
+            "library SDPA must select always_fuse (compile_sdpa_chain) "
+            "even when the analytical primary is ComputeMode"
+        )
+    if d_long.primary.fuse_epilogue:
+        raise AssertionError("analytical ComputeMode still leaves fuse_epilogue false")
 
 
 def run_selfcheck() -> None:

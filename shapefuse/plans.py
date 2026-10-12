@@ -22,6 +22,11 @@ ALWAYS_MEM_KINDS = frozenset({"ew_chain", "reduction", "softmax", "rmsnorm", "la
 
 ATTENTION_KINDS = frozenset({"attention_prefill", "attention_decode"})
 
+# Executable epilogue when the attention body is library SDPA. The bakeoff
+# times this name as ``always_fuse`` (compile SDPA and RMSNorm together).
+# It is not a new kernel, and it is not a measured winner in the plan cache.
+POLICY_COMPILE_SDPA_CHAIN = "compile_sdpa_chain"
+
 # Producers whose ComputeMode materializes the GEMM output.
 MATERIALIZE_ON_COMPUTE = frozenset({"gemm", "moe_expert", "moe_grouped", "quantized_epilogue"})
 
@@ -50,6 +55,9 @@ class PlanDecision:
     measured_winner: str | None
     kernel_emitted: bool
     rationale: str
+    # Empty for GEMM. Attention sets ``compile_sdpa_chain``: library SDPA
+    # already fuses scores, so the bakeoff epilogue prefers ``always_fuse``.
+    epilogue_policy: str = ""
     detail: dict = field(default_factory=dict)
 
     @property
@@ -137,11 +145,27 @@ def select_plan(report: IntensityReport, *, length: int | None = None) -> PlanDe
             f"AI is inside the ridge band and {side} the ridge point. "
             "Emit both plans. The measured winner is empty."
         )
+    epilogue_policy = ""
     if kind in ATTENTION_KINDS:
+        # Analytical primary stays MemMode or ComputeMode (tiles, and whether
+        # a custom mainloop would also absorb a heavy epilogue). The bakeoff
+        # cannot emit that mainloop. Both of its attention paths call library
+        # SDPA, which already keeps scores off HBM. ``always_unfuse`` only
+        # splits RMSNorm into a second timed region. The A40 wall-clock
+        # (paper/data/bakeoff) showed that split loses at prefill S=512 and
+        # S=2048. Score compile_sdpa_chain, timed as always_fuse, in every
+        # attention regime, including ridge and compute. A re-bakeoff is
+        # required before quoting a latency for this policy.
+        epilogue_policy = POLICY_COMPILE_SDPA_CHAIN
         why += (
             " Scores stay off HBM in both plans. Tile size and extra epilogue "
-            "fusion are what switch. This is not a Stage-Stream implementation "
-            "and not a new attention algorithm."
+            "fusion are what switch on a custom kernel. This is not a "
+            "Stage-Stream implementation and not a new attention algorithm. "
+            "Library SDPA already fuses scores, so the executable epilogue "
+            f"policy is {POLICY_COMPILE_SDPA_CHAIN} (timed as always_fuse), "
+            "including when the analytical primary is ComputeMode. "
+            "always_unfuse only splits RMSNorm off that library kernel. "
+            "Re-run the bakeoff before quoting latency for this policy."
         )
     elif kind == "moe_grouped":
         why += " Grouped-GEMM aggregate only; split experts with moe_expert rows."
@@ -160,6 +184,7 @@ def select_plan(report: IntensityReport, *, length: int | None = None) -> PlanDe
         measured_winner=None,
         kernel_emitted=False,
         rationale=why,
+        epilogue_policy=epilogue_policy,
         detail={"shape_bucket": shape_bucket(bucket_n)},
     )
 

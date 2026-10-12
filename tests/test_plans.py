@@ -5,7 +5,13 @@ from __future__ import annotations
 import unittest
 
 from shapefuse.machines import H100_SXM_FP16
-from shapefuse.plans import PlanCache, moe_is_heterogeneous, select_plan, shape_bucket
+from shapefuse.plans import (
+    POLICY_COMPILE_SDPA_CHAIN,
+    PlanCache,
+    moe_is_heterogeneous,
+    select_plan,
+    shape_bucket,
+)
 from shapefuse.scic import Site, classify_site
 from shapefuse.sweeps import build_sweeps
 
@@ -49,7 +55,10 @@ class PlanTests(unittest.TestCase):
         by = {row["label"]: row for row in attn}
         self.assertEqual(by["prefill_S128"]["primary_mode"], "MemMode")
         self.assertEqual(by["prefill_S8192"]["primary_mode"], "ComputeMode")
+        self.assertEqual(by["prefill_S8192"]["epilogue_policy"], POLICY_COMPILE_SDPA_CHAIN)
+        self.assertEqual(by["prefill_S8192"]["fuse_epilogue"], False)
         self.assertTrue(by["prefill_S512"]["emit_both"])
+        self.assertEqual(by["prefill_S512"]["epilogue_policy"], POLICY_COMPILE_SDPA_CHAIN)
 
     def test_intrinsic_ops_stay_mem_mode(self) -> None:
         bundle = build_sweeps(H100_SXM_FP16)

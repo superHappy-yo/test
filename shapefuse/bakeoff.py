@@ -20,7 +20,9 @@ What each baseline actually is:
   fuse. Attention still uses SDPA; the norm is timed as a second region.
 - ``scic_selected``: copies the median of ``always_fuse`` or
   ``always_unfuse`` according to :func:`select_executable_path`. It is
-  not a third kernel.
+  not a third kernel. Attention copies ``always_fuse``
+  (``compile_sdpa_chain``) in every regime. That override is not a
+  re-measured latency until the bakeoff is run again.
 
 ``quote_as_scic_accuracy`` is false. Profiler bytes are not read.
 Stage-Stream is not involved.
@@ -29,6 +31,7 @@ Stage-Stream is not involved.
 from __future__ import annotations
 
 import math
+import os
 import platform
 import sys
 import traceback
@@ -66,6 +69,8 @@ from shapefuse.plan_paths import (
     HONESTY_MAX_AUTOTUNE_FAILED,
     HONESTY_MAX_AUTOTUNE_NOT_FEASIBLE,
     HONESTY_MAX_AUTOTUNE_SKIPPED,
+    HONESTY_LIBRARY_SDPA_CHAIN,
+    HONESTY_LIBRARY_SDPA_NOT_PRIMARY,
     HONESTY_RIDGE_PRIMARY_ONLY,
     HONESTY_SCIC_COPIED,
     HONESTY_SCIC_MISSING,
@@ -75,7 +80,7 @@ from shapefuse.plan_paths import (
     join_honesty,
     select_executable_path,
 )
-from shapefuse.plans import select_plan
+from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, select_plan
 from shapefuse.scic import IntensityReport, Site, classify_site
 
 OP_GEMM = "matmul_rmsnorm"
@@ -218,6 +223,7 @@ def assemble_latency_rows(
     primary_mode: str,
     fuse_epilogue: bool,
     placeholder: bool,
+    epilogue_policy: str = "",
     backend: str,
     device_name: str,
     dtype_ran: str,
@@ -229,7 +235,23 @@ def assemble_latency_rows(
     rows: list[dict] = []
     for baseline in baselines:
         if baseline == BASELINE_SCIC:
-            meas = _scic_measurement(measurements.get(chosen), chosen, emit_both, attention, placeholder)
+            # Analytical ComputeMode leaves fuse_epilogue false. Library SDPA
+            # still times always_fuse. Do not label that copy as the
+            # analytical primary.
+            library_override = (
+                attention
+                and epilogue_policy == POLICY_COMPILE_SDPA_CHAIN
+                and chosen == BASELINE_ALWAYS_FUSE
+                and not fuse_epilogue
+            )
+            meas = _scic_measurement(
+                measurements.get(chosen),
+                chosen,
+                emit_both and not library_override,
+                attention,
+                placeholder,
+                library_override=library_override,
+            )
             copied = chosen if meas.ok else ""
         else:
             meas = measurements[baseline]
@@ -254,6 +276,7 @@ def assemble_latency_rows(
                 "roofline_limit": report.roofline_limit,
                 "primary_mode": primary_mode,
                 "fuse_epilogue": fuse_epilogue,
+                "epilogue_policy": epilogue_policy,
                 "emit_both": emit_both,
                 "analytical_ai": report.analytical_ai,
                 "machine": report.machine,
@@ -301,6 +324,7 @@ def decision_row(
         "alternate_mode": alternate,
         "emit_both": decision.emit_both,
         "fuse_epilogue": decision.primary.fuse_epilogue,
+        "epilogue_policy": decision.epilogue_policy,
         "materialize_intermediate": decision.primary.materialize_intermediate,
         "selected_baseline": chosen,
         "cache_key": decision.cache_key,
@@ -334,6 +358,14 @@ def run_bakeoff(
         raise ValueError(f"Unknown bakeoff level {level!r}. Known: {known}")
     machine = get_machine(machine_name)
     thresholds = Thresholds(mem_frac, compute_frac)
+    dynamo_limit = configure_dynamo_cache_limit()
+    if dynamo_limit is None:
+        print("Dynamo cache_size_limit: not set (torch._dynamo is not importable).")
+    else:
+        print(
+            f"Dynamo cache_size_limit={dynamo_limit}. "
+            "Graphs are not inspected. An idle GPU is recommended."
+        )
     ctx = resolve_backend(device, require_cuda, allow_cpu_fallback)
     cuda = ctx.backend == "cuda-torch"
     if repeats is None:
@@ -373,6 +405,7 @@ def run_bakeoff(
                 emit_both=decision.emit_both,
                 primary_mode=decision.primary.mode,
                 fuse_epilogue=decision.primary.fuse_epilogue,
+                epilogue_policy=decision.epilogue_policy,
                 placeholder=ctx.placeholder,
                 backend=ctx.backend,
                 device_name=ctx.device_name,
@@ -409,6 +442,7 @@ def run_bakeoff(
                     emit_both=decision.emit_both,
                     primary_mode=decision.primary.mode,
                     fuse_epilogue=decision.primary.fuse_epilogue,
+                    epilogue_policy=decision.epilogue_policy,
                     placeholder=ctx.placeholder,
                     backend=ctx.backend,
                     device_name=ctx.device_name,
@@ -474,14 +508,44 @@ def _failed_baselines(baselines: tuple[str, ...], ctx: BenchContext, error: str,
     }
 
 
+def configure_dynamo_cache_limit() -> int | None:
+    """Raise ``torch._dynamo.config.cache_size_limit`` when Dynamo imports.
+
+    The archived A40 bakeoff hit the default of 8 on the MatMul chain and
+    on ``sdpa_chain``. A higher limit lets each shape specialize. It does
+    not inspect the graph, and a compile-labelled row is still not proof
+    that compiled code ran. Returns the limit that was set, or ``None``
+    when Dynamo is not importable. Override with ``DYNAMO_CACHE_SIZE_LIMIT``.
+    """
+    raw = os.environ.get("DYNAMO_CACHE_SIZE_LIMIT", "64")
+    try:
+        limit = int(raw)
+    except ValueError:
+        limit = 64
+    if limit < 1:
+        limit = 64
+    try:
+        import torch._dynamo as dynamo
+    except Exception:
+        return None
+    dynamo.config.cache_size_limit = limit
+    return limit
+
+
 def _scic_measurement(
     source: Measurement | None,
     chosen: str,
     emit_both: bool,
     attention: bool,
     placeholder: bool,
+    library_override: bool = False,
 ) -> Measurement:
     extra = [HONESTY_SCIC_COPIED, f"TIMING_COPIED_FROM_{chosen}"]
+    if library_override:
+        extra.append(HONESTY_LIBRARY_SDPA_CHAIN)
+        extra.append(HONESTY_LIBRARY_SDPA_NOT_PRIMARY)
+    elif attention and chosen == BASELINE_ALWAYS_FUSE:
+        extra.append(HONESTY_LIBRARY_SDPA_CHAIN)
     if emit_both:
         extra.append(HONESTY_RIDGE_PRIMARY_ONLY)
     prefix = join_honesty(*common_honesty(placeholder=placeholder, attention=attention), *extra)
@@ -520,6 +584,7 @@ def _log_decision(op: str, label: str, report: IntensityReport, decision, chosen
         f" mode={decision.primary.mode}"
         f" emit_both={str(decision.emit_both).lower()}"
         f" fuse_epilogue={str(decision.primary.fuse_epilogue).lower()}"
+        f" epilogue_policy={decision.epilogue_policy or '-'}"
         f" -> {chosen}"
     )
 
@@ -1038,7 +1103,11 @@ def _summary(
             "Do not type them into the paper from memory, and do not fill a failed "
             "row. quote_as_scic_accuracy is false. sdpa is not FlashAttention-3. "
             "always_fuse and always_unfuse are not custom MemMode or ComputeMode kernels. "
-            "The regime column uses the requested datasheet ridge."
+            "The regime column uses the requested datasheet ridge. "
+            "Library attention scores compile_sdpa_chain (always_fuse) for the "
+            "epilogue, including in ridge and compute. Re-run the bakeoff before "
+            "quoting a latency for that policy. The archive in paper/data/bakeoff "
+            "is the pre-fix selector."
         ),
         "machine": machine.name,
         "ridge_flops_per_byte": machine.ridge,
@@ -1071,6 +1140,8 @@ def _summary(
             "A measured ridge on this GPU",
             "End-to-end tokens/s",
             "Plan-switch overhead on a serving trace",
+            "A re-bakeoff of the library-SDPA epilogue policy (compile_sdpa_chain). "
+            "paper/data/bakeoff is the pre-fix selector",
         ],
         "repro": {
             "python": sys.version.split()[0],

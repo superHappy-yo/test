@@ -11,6 +11,12 @@
 # SDPA rows are not FlashAttention-3. always-fuse / always-unfuse are not
 # custom MemMode or ComputeMode kernels. Stage-Stream is not run.
 #
+# Library attention scores compile_sdpa_chain (always_fuse) for the
+# epilogue. GEMM still unfuses on the compute side of the ridge.
+# Run on an idle GPU. The bakeoff raises Dynamo cache_size_limit
+# (default 64, override with DYNAMO_CACHE_SIZE_LIMIT). The archived
+# A40 run was not idle and hit the default limit of 8.
+#
 # Requires nvidia-smi and a CUDA build of PyTorch already installed.
 # This script does not install PyTorch and does not download a wheel.
 #
@@ -56,7 +62,12 @@ fi
 GPU_NAME="$("$PYTHON" -c "import torch; print(torch.cuda.get_device_name(0))")"
 echo "CUDA device: ${GPU_NAME}"
 echo "Datasheet anchor: ${MACHINE} (not a measured ridge)."
+echo "Idle GPU recommended. A busy device changes these latencies."
+echo "The archived A40 run was not idle (see paper/data/bakeoff/RUN_NOTES.txt)."
+echo "Dynamo cache_size_limit is raised inside the bakeoff (default 64)."
+echo "Override with DYNAMO_CACHE_SIZE_LIMIT. Graphs are still not inspected."
 echo "Nsight is not invoked. achieved AI and SCIC accuracy are not outputs of this script."
+echo "Attention epilogue policy is compile_sdpa_chain (always_fuse). Re-run after that change before quoting it."
 
 mkdir -p "$OUT"
 nvidia-smi >"$OUT/nvidia_smi.txt"

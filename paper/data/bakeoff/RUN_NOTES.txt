@@ -1,0 +1,17 @@
+Branch: cursor/docker-baseline-bakeoff-d966
+Commit: 81ec1c5
+Command: SKIP_INSTALL=1 bash scripts/run_baseline_bakeoff.sh
+Installed this checkout with pip install -e . before running.
+Attention and max-autotune were enabled. Selfcheck and the script passed.
+
+Measurement limitations observed in this run:
+- At script startup, nvidia-smi showed GPU 0 at 83% utilization with
+  13092 MiB allocated, and GPU 1 at 77% with 12948 MiB allocated.
+  Concurrent workload can affect latency; this was not an idle-GPU run.
+- PyTorch Dynamo reported cache_size_limit (8) for chain and sdpa_chain.
+  The CSV reports all 77 rows as ok, but that does not establish that
+  every compile-labelled row executed compiled code. Graphs were not inspected.
+- SCIC-selected timing rows copy the chosen baseline timing; they do not
+  measure dispatch overhead. Nsight and measured SCIC accuracy were not run.
+
+See run.log and nvidia_smi.txt for original evidence.

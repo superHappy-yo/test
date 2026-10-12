@@ -514,6 +514,7 @@ def _decision_to_row(decision) -> dict:
         "alternate_mode": alt,
         "emit_both": decision.emit_both,
         "fuse_epilogue": decision.primary.fuse_epilogue,
+        "epilogue_policy": decision.epilogue_policy,
         "materialize_intermediate": decision.primary.materialize_intermediate,
         "tile": decision.primary.tile,
         "protect_mma_pipeline": decision.primary.protect_mma_pipeline,

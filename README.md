@@ -40,7 +40,11 @@ scripts/run_baseline_bakeoff.sh   Docker wall-clock bakeoff, no Nsight
 
 ## Docker bakeoff (one command, no Nsight)
 
-This is the run to send back. It times MatMul+RMSNorm and an attention microbench on CUDA. SCIC chooses `always_fuse` or `always_unfuse` from the datasheet regime and the choice is logged. It does not run Nsight, does not claim FlashAttention-3, and does not quote a profiler as SCIC accuracy.
+This is the run to send back. It times MatMul+RMSNorm and an attention microbench on CUDA. GEMM follows the datasheet regime: MemMode selects `always_fuse`, ComputeMode selects `always_unfuse`. Library attention scores `compile_sdpa_chain`, timed as `always_fuse`, in every regime, because SDPA already fuses scores. That attention change is not in `paper/data/bakeoff/` (that archive is the pre-fix selector). Please re-run the bakeoff before quoting it. The script does not run Nsight, does not claim FlashAttention-3, and does not quote a profiler as SCIC accuracy.
+
+**Idle GPU recommended.** The archived A40 run was not idle: `paper/data/bakeoff/RUN_NOTES.txt` records GPU 0 at 83% utilization and GPU 1 at 77% when the script started. A busy device changes the medians.
+
+**Raise Dynamo's cache limit.** That same run hit `torch._dynamo.config.cache_size_limit` at the default of 8 for the MatMul chain and for `sdpa_chain`. All 77 rows were `ok`, and the graphs were not inspected, so a compile-labelled row is not proof that compiled code ran. The bakeoff now sets the limit to 64 before compiling. Override with `DYNAMO_CACHE_SIZE_LIMIT`. A higher limit does not inspect the graph.
 
 ```bash
 bash scripts/run_baseline_bakeoff.sh
@@ -213,7 +217,7 @@ print(report.regime, decision.primary.mode, decision.emit_both, decision.kernel_
 
 ## Paper
 
-- English draft: [`paper/draft.md`](paper/draft.md). Every missing GPU number is marked **TBD**.
+- English draft: [`paper/draft.md`](paper/draft.md). §7.3 quotes `paper/data/bakeoff/`. That archive is the pre-fix attention selector. Every other missing GPU number is marked **TBD**.
 - Chinese outline: [`paper/zh_outline.md`](paper/zh_outline.md).
 
 ---
@@ -232,7 +236,11 @@ print(report.regime, decision.primary.mode, decision.emit_both, decision.kernel_
 
 ## Docker bakeoff（一条命令，无 Nsight）
 
-请跑这一条，并把目录寄回。它在 CUDA 上计 MatMul+RMSNorm，以及可选的 Attention 微基准。SCIC 按数据手册分档在 `always_fuse` 和 `always_unfuse` 之间选择，并写入日志。不跑 Nsight，不宣称 FA-3，不把 profiler 写成准确率。
+请跑这一条，并把目录寄回。它在 CUDA 上计 MatMul+RMSNorm，以及可选的 Attention 微基准。GEMM 按数据手册分档：MemMode 选 `always_fuse`，ComputeMode 选 `always_unfuse`。库 Attention 的 epilogue 在所有档位都记 `compile_sdpa_chain`（计时为 `always_fuse`），因为 SDPA 已经融合了 score。`paper/data/bakeoff/` 是改这条规则之前的归档，不能当成修复后的时延。请在空闲 GPU 上重跑 bakeoff，再引用修复后的选择。不跑 Nsight，不宣称 FA-3，不把 profiler 写成准确率。
+
+**建议空闲 GPU。** 已归档的 A40 运行不是空闲的：`paper/data/bakeoff/RUN_NOTES.txt` 记录脚本启动时 GPU 0 利用率 83%，GPU 1 为 77%。忙设备会改变 median。
+
+**请提高 Dynamo 的 cache 上限。** 同一次运行里 MatMul 链和 `sdpa_chain` 打到了 `torch._dynamo.config.cache_size_limit` 的默认值 8。77 行都是 `ok`，图没有被检查，所以标成 compile 的行不能证明跑的是编译后的代码。bakeoff 现在在编译前把上限设为 64。可用 `DYNAMO_CACHE_SIZE_LIMIT` 覆盖。提高上限不会检查图。
 
 ```bash
 bash scripts/run_baseline_bakeoff.sh
@@ -359,4 +367,4 @@ Achieved AI = FLOPs / 实测 DRAM 字节。FLOPs / 时延是吞吐，不是强�
 - Decode Attention（MHA、FP16）在任意 KV 长度上 AI 都接近 1。GQA 只把这个常数抬高，相对 H100 ridge 仍然是访存。
 - 倾斜的 MoE 层里，瘦专家和胖专家可以分别是访存和计算。`moe_grouped.csv` 里还有「one-hot 但仍加载全部专家权重」的对照：会从 compute-bound 掉回 ridge。
 
-英文草稿：[`paper/draft.md`](paper/draft.md)（缺的 GPU 数字都标了 TBD）。中文提纲：[`paper/zh_outline.md`](paper/zh_outline.md)。
+英文草稿：[`paper/draft.md`](paper/draft.md)。§7.3 引用 `paper/data/bakeoff/`，那是 Attention 修复前的归档。其余缺的 GPU 数字标了 TBD。中文提纲：[`paper/zh_outline.md`](paper/zh_outline.md)。

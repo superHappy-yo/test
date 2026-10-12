@@ -12,6 +12,7 @@ from shapefuse.bakeoff import (
     GEMM_LEVELS,
     Measurement,
     assemble_latency_rows,
+    configure_dynamo_cache_limit,
     decide_attention,
     decide_gemm,
 )
@@ -25,7 +26,7 @@ from shapefuse.plan_paths import (
     BASELINE_SCIC,
 )
 from shapefuse.scic import Site, classify_site
-from shapefuse.plans import select_plan
+from shapefuse.plans import POLICY_COMPILE_SDPA_CHAIN, select_plan
 
 
 class PathSelectionTests(unittest.TestCase):
@@ -52,26 +53,28 @@ class PathSelectionTests(unittest.TestCase):
         self.assertEqual(by_label["prefill_m2048"], BASELINE_ALWAYS_UNFUSE)
         self.assertEqual(by_label["prefill_m4096"], BASELINE_ALWAYS_UNFUSE)
 
-    def test_attention_keeps_scores_off_hbm_and_switches_epilogue(self) -> None:
+    def test_attention_keeps_scores_off_hbm_and_fuses_library_epilogue(self) -> None:
         thresholds = Thresholds()
-        chosen = []
         for shape in ATTN_LEVELS["decode-prefill"]:
             _report, decision, path = decide_attention(shape, A40_FP16, thresholds)
-            chosen.append(path)
             self.assertFalse(decision.primary.materialize_intermediate)
             self.assertFalse(decision.kernel_emitted)
-            self.assertIn(path, {BASELINE_ALWAYS_FUSE, BASELINE_ALWAYS_UNFUSE})
-        self.assertEqual(chosen.count(BASELINE_ALWAYS_FUSE) > 0, True)
-        self.assertIn(BASELINE_ALWAYS_UNFUSE, chosen)
+            self.assertEqual(decision.epilogue_policy, POLICY_COMPILE_SDPA_CHAIN)
+            self.assertEqual(path, BASELINE_ALWAYS_FUSE)
         by_label = {
             shape.label: decide_attention(shape, A40_FP16, thresholds)
             for shape in ATTN_LEVELS["decode-prefill"]
         }
-        self.assertEqual(by_label["prefill_s128"][2], BASELINE_ALWAYS_FUSE)
         self.assertEqual(by_label["prefill_s128"][1].primary.mode, "MemMode")
-        self.assertEqual(by_label["prefill_s2048"][2], BASELINE_ALWAYS_UNFUSE)
+        self.assertTrue(by_label["prefill_s128"][1].primary.fuse_epilogue)
+        # Analytical primary stays ComputeMode. The timed path does not.
         self.assertEqual(by_label["prefill_s2048"][1].primary.mode, "ComputeMode")
+        self.assertFalse(by_label["prefill_s2048"][1].primary.fuse_epilogue)
+        self.assertEqual(by_label["prefill_s2048"][2], BASELINE_ALWAYS_FUSE)
         self.assertTrue(by_label["prefill_s512"][1].emit_both)
+        self.assertEqual(by_label["prefill_s512"][1].primary.mode, "ComputeMode")
+        self.assertEqual(by_label["prefill_s512"][2], BASELINE_ALWAYS_FUSE)
+        self.assertEqual(by_label["decode_sk2048"][1].primary.mode, "MemMode")
         self.assertEqual(by_label["decode_sk2048"][2], BASELINE_ALWAYS_FUSE)
 
     def test_h100_memory_and_compute_match_the_selector(self) -> None:
@@ -168,6 +171,78 @@ class AssembleTests(unittest.TestCase):
         self.assertIn("SCIC_SELECTED_PATH_DID_NOT_RUN", scic["honesty"])
         self.assertIn("PLACEHOLDER_NO_GPU", scic["honesty"])
 
+    def test_prefill_compute_copies_compile_sdpa_chain(self) -> None:
+        shape = next(s for s in ATTN_LEVELS["decode-prefill"] if s.label == "prefill_s2048")
+        report, decision, chosen = decide_attention(shape, A40_FP16, Thresholds())
+        self.assertEqual(decision.primary.mode, "ComputeMode")
+        self.assertEqual(chosen, BASELINE_ALWAYS_FUSE)
+        measurements = {
+            "eager_unfused": Measurement(2.0, True, "", "EAGER"),
+            "always_fuse": Measurement(0.4, True, "", "FUSE"),
+            "always_unfuse": Measurement(1.5, True, "", "UNFUSE"),
+        }
+        rows = assemble_latency_rows(
+            op="attention",
+            label="prefill_s2048",
+            shape="B=1,H=8,S=2048,D=64",
+            baselines=("eager_unfused", "always_fuse", "always_unfuse", "scic_selected"),
+            measurements=measurements,
+            chosen=chosen,
+            report=report,
+            emit_both=decision.emit_both,
+            primary_mode=decision.primary.mode,
+            fuse_epilogue=decision.primary.fuse_epilogue,
+            epilogue_policy=decision.epilogue_policy,
+            placeholder=False,
+            backend="cuda-torch",
+            device_name="NVIDIA A40",
+            dtype_ran="fp16",
+        )
+        scic = next(row for row in rows if row["baseline"] == BASELINE_SCIC)
+        self.assertEqual(scic["median_ms"], 0.4)
+        self.assertEqual(scic["timing_copied_from"], BASELINE_ALWAYS_FUSE)
+        self.assertEqual(scic["epilogue_policy"], POLICY_COMPILE_SDPA_CHAIN)
+        self.assertIn("LIBRARY_SDPA_EPILOGUE_COMPILE_SDPA_CHAIN", scic["honesty"])
+        self.assertIn("LIBRARY_SDPA_CHAIN_NOT_ANALYTICAL_PRIMARY", scic["honesty"])
+        self.assertNotIn("RIDGE_BAND_EMIT_BOTH_TIMED_PRIMARY_ONLY", scic["honesty"])
+        self.assertFalse(scic["quote_as_scic_accuracy"])
+
+    def test_ridge_prefill_does_not_claim_the_analytical_primary(self) -> None:
+        shape = next(s for s in ATTN_LEVELS["decode-prefill"] if s.label == "prefill_s512")
+        report, decision, chosen = decide_attention(shape, A40_FP16, Thresholds())
+        self.assertTrue(decision.emit_both)
+        self.assertEqual(decision.primary.mode, "ComputeMode")
+        self.assertEqual(chosen, BASELINE_ALWAYS_FUSE)
+        measurements = {
+            "eager_unfused": Measurement(2.0, True, "", "EAGER"),
+            "always_fuse": Measurement(0.5, True, "", "FUSE"),
+            "always_unfuse": Measurement(1.2, True, "", "UNFUSE"),
+        }
+        rows = assemble_latency_rows(
+            op="attention",
+            label="prefill_s512",
+            shape="B=1,H=8,S=512,D=64",
+            baselines=("scic_selected",),
+            measurements=measurements,
+            chosen=chosen,
+            report=report,
+            emit_both=decision.emit_both,
+            primary_mode=decision.primary.mode,
+            fuse_epilogue=decision.primary.fuse_epilogue,
+            epilogue_policy=decision.epilogue_policy,
+            placeholder=False,
+            backend="cuda-torch",
+            device_name="NVIDIA A40",
+            dtype_ran="fp16",
+        )
+        scic = rows[0]
+        self.assertEqual(scic["timing_copied_from"], BASELINE_ALWAYS_FUSE)
+        self.assertNotIn("RIDGE_BAND_EMIT_BOTH_TIMED_PRIMARY_ONLY", scic["honesty"])
+        self.assertIn("LIBRARY_SDPA_CHAIN_NOT_ANALYTICAL_PRIMARY", scic["honesty"])
+
+    def test_dynamo_limit_is_a_noop_without_torch(self) -> None:
+        self.assertIsNone(configure_dynamo_cache_limit())
+
 
 class BakeoffCliTests(unittest.TestCase):
     def test_cpu_smoke_writes_the_schema(self) -> None:
@@ -233,6 +308,8 @@ class BakeoffCliTests(unittest.TestCase):
             for row in attn:
                 self.assertEqual(row["materialize_intermediate"], "false")
                 self.assertEqual(row["claims_fa3"], "false")
+                self.assertEqual(row["epilogue_policy"], "compile_sdpa_chain")
+                self.assertEqual(row["selected_baseline"], "always_fuse")
 
     def test_script_does_not_call_nsight(self) -> None:
         text = Path("scripts/run_baseline_bakeoff.sh").read_text(encoding="utf-8")
@@ -242,6 +319,8 @@ class BakeoffCliTests(unittest.TestCase):
         self.assertNotIn("ncu ", text)
         self.assertIn("--require-cuda", text)
         self.assertIn("--attention", text)
+        self.assertIn("cache_size_limit", text)
+        self.assertIn("Idle GPU", text)
 
 
 if __name__ == "__main__":

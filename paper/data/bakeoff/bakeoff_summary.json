@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "package_version": "0.3.0",
+  "eval": "wall_clock_subgraph_latency_and_plan_selection",
+  "gpu_measurement_status": "BAKEOFF_WALLCLOCK",
+  "nsight_used": false,
+  "quote_as_scic_accuracy": false,
+  "claims_fa3": false,
+  "claims_stage_stream": false,
+  "claims_custom_memmode_kernel": false,
+  "claims_custom_computemode_kernel": false,
+  "graph_inspected": false,
+  "do_not_invent_numbers": true,
+  "note": "Latencies are whatever bakeoff_latency.csv recorded for this process. Do not type them into the paper from memory, and do not fill a failed row. quote_as_scic_accuracy is false. sdpa is not FlashAttention-3. always_fuse and always_unfuse are not custom MemMode or ComputeMode kernels. The regime column uses the requested datasheet ridge.",
+  "machine": "A40_FP16",
+  "ridge_flops_per_byte": 215.08620689655172,
+  "ridge_source": "datasheet",
+  "thresholds": {
+    "mem_frac": 0.5,
+    "compute_frac": 2.0
+  },
+  "level": "decode-prefill",
+  "attention": true,
+  "skip_max_autotune": false,
+  "repeats": 10,
+  "warmup": 3,
+  "backend": "cuda-torch",
+  "device_name": "NVIDIA A40",
+  "torch_version": "2.5.1+cu121",
+  "cuda_version": "12.1",
+  "placeholder": false,
+  "rows": 77,
+  "rows_ok": 77,
+  "decisions": 12,
+  "selected_baseline_counts": {
+    "always_fuse": 6,
+    "always_unfuse": 6
+  },
+  "rows_file": "bakeoff_latency.csv",
+  "decisions_file": "bakeoff_decisions.csv",
+  "baselines_gemm": [
+    "eager_unfused",
+    "torch_compile_default",
+    "torch_compile_max_autotune",
+    "always_fuse",
+    "always_unfuse",
+    "scic_selected"
+  ],
+  "baselines_attention": [
+    "eager_unfused",
+    "torch_compile_default",
+    "torch_compile_max_autotune",
+    "sdpa",
+    "always_fuse",
+    "always_unfuse",
+    "scic_selected"
+  ],
+  "still_tbd": [
+    "Nsight DRAM bytes and achieved AI (not collected; Docker bakeoff does not run Nsight)",
+    "SCIC accuracy against isolated Nsight AI (quote_as_scic_accuracy is false)",
+    "Custom MemMode and ComputeMode CUDA kernels",
+    "FlashAttention-3 kernels (sdpa rows are the PyTorch library operator)",
+    "Stage-Stream",
+    "A measured ridge on this GPU",
+    "End-to-end tokens/s",
+    "Plan-switch overhead on a serving trace"
+  ],
+  "repro": {
+    "python": "3.10.12",
+    "platform": "Linux-3.10.0-1160.119.1.el7.x86_64-x86_64-with-glibc2.35",
+    "command": "/root/test/shapefuse/__main__.py bakeoff --out /root/test/results/bakeoff --device cuda --require-cuda --machine A40_FP16 --level decode-prefill --skip-plots --attention"
+  }
+}
