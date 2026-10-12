@@ -1,0 +1,31 @@
+Branch: cursor/calibrated-scic-gemm-f3e1
+Commit: 361366c
+Command: CUDA_VISIBLE_DEVICES=GPU-dcecbada-f0a3-539e-9a2c-c6c50d80c4fd CALIBRATE=all-gemm SKIP_INSTALL=1 bash scripts/run_baseline_bakeoff.sh
+Used the already installed shapefuse 0.3.1 checkout.
+Attention and max-autotune enabled. Dynamo cache_size_limit=64; no cache-limit-hit warning.
+Probe repeats=3, warmup=1; regular timing repeats=10, warmup=3.
+Selfcheck passed. 77/77 latency rows ok, 12 decisions, 7 plan-cache entries.
+All 7 GEMMs have selection_source=measured_wallclock. All 5 attention rows have selection_source=library_sdpa.
+
+GPU conditions:
+Waited for two consecutive idle samples on physical GPU 1. Script startup also reported 0% utilization and 4 MiB allocated.
+GPU monitor total memory peaked at 670 MiB; monitor includes the benchmark itself and cannot isolate other processes.
+See gpu_selection.json, gpu_monitor.csv and nvidia_smi.txt for source evidence.
+
+GEMM calibration audit (probe and final medians):
+{'label': 'decode_m1', 'analytical_baseline': 'always_fuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_unfuse', 'selected_baseline': 'always_unfuse', 'calibration_fuse_ms': '0.1177600026', 'calibration_unfuse_ms': '0.09830400348', 'final_fuse_ms': '0.1146880016', 'final_unfuse_ms': '0.08806400001', 'final_selected_ms': '0.08806400001', 'speedup_vs_eager': '0.9936409823', 'regular_winner': 'always_unfuse', 'probe_agrees_with_regular': True}
+{'label': 'decode_m32', 'analytical_baseline': 'always_fuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_unfuse', 'selected_baseline': 'always_unfuse', 'calibration_fuse_ms': '0.1251520067', 'calibration_unfuse_ms': '0.1023999974', 'final_fuse_ms': '0.119280003', 'final_unfuse_ms': '0.1003359966', 'final_selected_ms': '0.1003359966', 'speedup_vs_eager': '0.9990432446', 'regular_winner': 'always_unfuse', 'probe_agrees_with_regular': True}
+{'label': 'ridge_m128', 'analytical_baseline': 'always_fuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_unfuse', 'selected_baseline': 'always_unfuse', 'calibration_fuse_ms': '0.1239039972', 'calibration_unfuse_ms': '0.1064959988', 'final_fuse_ms': '0.1208320037', 'final_unfuse_ms': '0.1044639982', 'final_selected_ms': '0.1044639982', 'speedup_vs_eager': '0.9990810161', 'regular_winner': 'always_unfuse', 'probe_agrees_with_regular': True}
+{'label': 'ridge_m256', 'analytical_baseline': 'always_unfuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_unfuse', 'selected_baseline': 'always_unfuse', 'calibration_fuse_ms': '0.1893759966', 'calibration_unfuse_ms': '0.1597439945', 'final_fuse_ms': '0.1710080057', 'final_unfuse_ms': '0.1571839973', 'final_selected_ms': '0.1571839973', 'speedup_vs_eager': '1.022801335', 'regular_winner': 'always_unfuse', 'probe_agrees_with_regular': True}
+{'label': 'ridge_m512', 'analytical_baseline': 'always_unfuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_fuse', 'selected_baseline': 'always_fuse', 'calibration_fuse_ms': '0.2303359956', 'calibration_unfuse_ms': '0.2416640073', 'final_fuse_ms': '0.2247679979', 'final_unfuse_ms': '0.2396160066', 'final_selected_ms': '0.2247679979', 'speedup_vs_eager': '1.066059265', 'regular_winner': 'always_fuse', 'probe_agrees_with_regular': True}
+{'label': 'prefill_m2048', 'analytical_baseline': 'always_unfuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_fuse', 'selected_baseline': 'always_fuse', 'calibration_fuse_ms': '0.7557119727', 'calibration_unfuse_ms': '0.8837119937', 'final_fuse_ms': '0.7710720003', 'final_unfuse_ms': '0.8744959831', 'final_selected_ms': '0.7710720003', 'speedup_vs_eager': '1.134130124', 'regular_winner': 'always_fuse', 'probe_agrees_with_regular': True}
+{'label': 'prefill_m4096', 'analytical_baseline': 'always_unfuse', 'selection_source': 'measured_wallclock', 'measured_winner': 'always_fuse', 'selected_baseline': 'always_fuse', 'calibration_fuse_ms': '1.368927956', 'calibration_unfuse_ms': '1.636191964', 'final_fuse_ms': '1.371071994', 'final_unfuse_ms': '1.641903996', 'final_selected_ms': '1.371071994', 'speedup_vs_eager': '1.186761891', 'regular_winner': 'always_fuse', 'probe_agrees_with_regular': True}
+
+All seven probe winners matched the faster regular baseline in this run.
+M=1,32,128,256 selected always_unfuse. M=512,2048,4096 selected always_fuse.
+Decode selected speedup_vs_eager: M=1 0.9936409823, M=32 0.9990432446.
+These are single-run latency results and can vary between runs.
+Attention remains library_sdpa / always_fuse and has no measured_winner.
+SCIC-selected medians copy the chosen regular baseline. Dispatch and switch overhead are not independently measured.
+measured_winner is wall-clock calibration, not Nsight AI or measured SCIC classification accuracy.
+Graphs were not inspected. Nsight was not run. quote_as_scic_accuracy=false.

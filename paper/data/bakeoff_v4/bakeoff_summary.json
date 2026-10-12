@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "package_version": "0.3.1",
+  "eval": "wall_clock_subgraph_latency_and_plan_selection",
+  "gpu_measurement_status": "BAKEOFF_WALLCLOCK",
+  "nsight_used": false,
+  "quote_as_scic_accuracy": false,
+  "claims_fa3": false,
+  "claims_stage_stream": false,
+  "claims_custom_memmode_kernel": false,
+  "claims_custom_computemode_kernel": false,
+  "graph_inspected": false,
+  "do_not_invent_numbers": true,
+  "note": "Latencies are whatever bakeoff_latency.csv recorded for this process. Do not type them into the paper from memory, and do not fill a failed row. quote_as_scic_accuracy is false. sdpa is not FlashAttention-3. always_fuse and always_unfuse are not custom MemMode or ComputeMode kernels. The regime column uses the requested datasheet ridge. Library attention scores compile_sdpa_chain (always_fuse) for the epilogue, including in ridge and compute. paper/data/bakeoff is the pre-fix selector. paper/data/bakeoff_v2 is the attention-fix wall-clock on a busy GPU and predates GEMM calibration. Ridge and compute GEMM (scope ridge-compute) take a few-shot wall-clock of always_fuse versus always_unfuse. selected_baseline follows measured_winner when that probe returns one, else the analytical baseline. The probe is wall-clock on this machine, not DRAM AI. A busy GPU can flip the winner. It is not SCIC accuracy.",
+  "machine": "A40_FP16",
+  "ridge_flops_per_byte": 215.08620689655172,
+  "ridge_source": "datasheet",
+  "thresholds": {
+    "mem_frac": 0.5,
+    "compute_frac": 2.0
+  },
+  "level": "decode-prefill",
+  "attention": true,
+  "skip_max_autotune": false,
+  "repeats": 10,
+  "warmup": 3,
+  "gemm_calibration": {
+    "scope": "all-gemm",
+    "metric": "wallclock_median_ms",
+    "repeats": 3,
+    "warmup": 1,
+    "not_dram_ai": true,
+    "gpu_contention_can_flip_winner": true,
+    "quote_as_scic_accuracy": false,
+    "attention_policy": "compile_sdpa_chain",
+    "plan_cache_entries": 7
+  },
+  "backend": "cuda-torch",
+  "device_name": "NVIDIA A40",
+  "torch_version": "2.5.1+cu121",
+  "cuda_version": "12.1",
+  "placeholder": false,
+  "rows": 77,
+  "rows_ok": 77,
+  "decisions": 12,
+  "selected_baseline_counts": {
+    "always_unfuse": 4,
+    "always_fuse": 8
+  },
+  "selection_source_counts": {
+    "measured_wallclock": 7,
+    "library_sdpa": 5
+  },
+  "rows_file": "bakeoff_latency.csv",
+  "decisions_file": "bakeoff_decisions.csv",
+  "baselines_gemm": [
+    "eager_unfused",
+    "torch_compile_default",
+    "torch_compile_max_autotune",
+    "always_fuse",
+    "always_unfuse",
+    "scic_selected"
+  ],
+  "baselines_attention": [
+    "eager_unfused",
+    "torch_compile_default",
+    "torch_compile_max_autotune",
+    "sdpa",
+    "always_fuse",
+    "always_unfuse",
+    "scic_selected"
+  ],
+  "still_tbd": [
+    "Nsight DRAM bytes and achieved AI (not collected; Docker bakeoff does not run Nsight)",
+    "SCIC accuracy against isolated Nsight AI (quote_as_scic_accuracy is false)",
+    "Custom MemMode and ComputeMode CUDA kernels",
+    "FlashAttention-3 kernels (sdpa rows are the PyTorch library operator)",
+    "Stage-Stream",
+    "A measured ridge on this GPU",
+    "End-to-end tokens/s",
+    "Plan-switch overhead on a serving trace",
+    "Nsight DRAM AI for the GEMM probe. measured_winner is wall-clock on this machine. GPU contention can flip it. Not SCIC accuracy",
+    "A re-run of scripts/run_baseline_bakeoff.sh. paper/data/bakeoff_v2 predates the probe and still copies always_unfuse on ridge and compute GEMM",
+    "paper/data/bakeoff is the pre-fix attention selector. paper/data/bakeoff_v2 is the compile_sdpa_chain wall-clock on a busy GPU"
+  ],
+  "repro": {
+    "python": "3.10.12",
+    "platform": "Linux-3.10.0-1160.119.1.el7.x86_64-x86_64-with-glibc2.35",
+    "command": "/root/test/shapefuse/__main__.py bakeoff --out /root/test/results/bakeoff --device cuda --require-cuda --machine A40_FP16 --level decode-prefill --skip-plots --calibrate all-gemm --attention"
+  }
+}
