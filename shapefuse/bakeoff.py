@@ -927,8 +927,7 @@ def _time_gemm_torch(
 
     def chain():
         c = a @ b
-        var = (c * c).mean(dim=-1, keepdim=True)
-        return c * torch.rsqrt(var + 1e-6) * weight
+        return _torch_rmsnorm(c, weight)
 
     compiled_fn = None
     if calibrate:
@@ -1175,8 +1174,14 @@ def _torch_materialized(q, k, v):
 def _torch_rmsnorm(y, weight):
     import torch
 
-    var = (y * y).mean(dim=-1, keepdim=True)
-    return y * torch.rsqrt(var + 1e-6) * weight
+    # FP16 GEMM outputs can overflow when squared in FP16. Inductor may
+    # retain FP32 intermediates, making the old eager and compiled chains
+    # numerically different. Use the same explicit FP32 normalization in
+    # both paths and restore the original output dtype only at the end.
+    values = y.float()
+    var = (values * values).mean(dim=-1, keepdim=True)
+    result = values * torch.rsqrt(var + 1e-6) * weight.float()
+    return result.to(dtype=y.dtype)
 
 
 def _spec(ctx: BenchContext, specific: str, attention: bool) -> str:

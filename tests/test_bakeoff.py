@@ -6,6 +6,7 @@ import csv
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from shapefuse.bakeoff import (
     ATTN_LEVELS,
@@ -378,7 +379,8 @@ class AssembleTests(unittest.TestCase):
         self.assertIn("LIBRARY_SDPA_CHAIN_NOT_ANALYTICAL_PRIMARY", scic["honesty"])
 
     def test_dynamo_limit_is_a_noop_without_torch(self) -> None:
-        self.assertIsNone(configure_dynamo_cache_limit())
+        with patch.dict("sys.modules", {"torch": None, "torch._dynamo": None}):
+            self.assertIsNone(configure_dynamo_cache_limit())
 
 
 class BakeoffCliTests(unittest.TestCase):

@@ -1,0 +1,107 @@
+\subsection{Questions, workloads, and comparison hierarchy}
+\label{sec:supplement}
+
+The supplementary evaluation asks three questions: whether executable selection improves on optimized static paths, whether recent fusion artifacts can be compared on the same function, and whether subgraph results translate to complete inference.
+Eager execution is a numerical and conventional execution reference, rather than a state-of-the-art optimization baseline.
+The stronger comparisons use default compilation, max-autotune without internal CUDA Graphs, library SDPA, and FlashAttention-2.
+We evaluate direct calls and controlled whole-chain CUDA Graph replay separately; results from these configurations are not pooled.
+
+The GEMM matrix contains 21 shapes.
+It retains the seven width-4096 pilot shapes, adds square widths 1024 and 8192 at $M\in\{1,128,512,2048\}$, and adds $(K,N)=(1024,3072)$ and $(3072,1024)$ at $M\in\{1,128,512\}$.
+The nine attention cases retain the five pilot shapes and add causal prefill with $D=128$ at $S=512,2048$, and batch-eight GQA decode with $H_q=16$, $H_{kv}=8$, $D=64$, and $S_k=128,2048$.
+For single-query decode all supplied KV entries are visible; applying an upper-left triangular mask would incorrectly exclude cached tokens.
+
+We record PyTorch 2.5.1 with CUDA 12.1 and PyTorch 2.14.1 with CUDA 12.6 in separate environments.
+Each admitted path must pass complete-output validation, including a second random seed and a larger-magnitude GEMM input.
+The GEMM reference applies FP32 normalization to an FP16 product, with $10^{-3}$ relative and absolute tolerances; the attention FP32 reference uses $10^{-2}$ tolerances.
+A rejected or unavailable candidate has no performance result and is excluded from the measured candidate minimum.
+Paired comparisons with max-autotune use only their common admitted cases.
+
+\subsection{Executed selection, timing, and calibration cost}
+\label{sec:executed}
+
+The supplementary executor invokes the selected callable on every measured call.
+It never substitutes another row's median for its own latency.
+Cache entries retain an exact tensor signature, including shape, strides, dtype, device, implementation identity, and device identity, alongside the analytical bucket.
+An unprepared signature must be prepared before regular measurement or graph capture.
+This prevents a bucket-level choice from silently reusing a different layout or precision.
+
+The analytical rule and the $0.5R/2R$ thresholds are unchanged.
+The main calibration scope remains ridge-plus-compute; analytical-only, ridge-only, and all-GEMM selection are separate ablations.
+The ridge-only scope is an experimental variant rather than a change to the existing default.
+Attention retains its fixed compiled-SDPA binding, so attention results do not demonstrate adaptive attention-plan selection.
+Calibration uses three warmups and ten CUDA-event samples per candidate; the measurement helper also executes a separate ten-call host batch.
+The reported calibration cost includes both batches and their synchronization.
+Calibration samples are separate from regular samples.
+Their elapsed setup cost is reported rather than incorporated into a steady-state speedup.
+
+The operator protocol uses 50 warmups and 200 measured calls.
+CUDA-event intervals and synchronized host batches are recorded separately.
+Event intervals may include gaps caused by host dispatch and do not measure active-kernel time alone.
+Host batch time includes actual callable dispatch and launches, with one final synchronization amortized over the batch.
+Compiler preparation and numerical validation occur outside regular timing.
+Manifests, individual samples, validation results, and available kernel/backend traces accompany each process.
+Candidate timing order is logged: the first PyTorch 2.5.1 device series began with fixed order, and later series use seeded shuffling.
+The two A40 devices are measured in separate processes, with three repetitions per device.
+The PyTorch 2.14.1 GPU-1 series batches shapes within each repetition to avoid repeated framework startup; GPU-0 uses shape-isolated processes.
+Analysis pairs both the shape and process, and bootstrap clusters retain each device/repetition; unavailable candidates and interrupted processes remain visible in the archive.
+
+\subsection{Recent fusion artifacts and reproduction boundaries}
+\label{sec:research-artifacts}
+
+RedFuser and Neptune provide public 2026 fusion artifacts~\cite{Tang2026RedFuser,Zhao2026Neptune}.
+Their attention bodies are compared as complete attention-plus-RMSNorm functions with the same compiled FP32 normalization epilogue.
+This avoids appending an unoptimized normalization chain only to the research kernel.
+The comparison concerns executable functions, not classifier accuracy or a reproduction of the authors' published speedups.
+Official default schedules are identified explicitly; they are not presented as exhaustive autotuning results.
+
+The RedFuser source is pinned to commit \texttt{56bf0b28}, and Neptune to \texttt{f7975011}.
+The RedFuser generator requires compatibility handling for SymPy identity constants and unit-dimension TIR indices.
+The exact patch is retained, and complete-output validation still rejects the regenerated kernel in the initial audit.
+Its committed pre-generated kernel is evaluated separately, changing only literal tensor dimensions and launch extents.
+Successful execution of that artifact does not establish successful automatic regeneration.
+Unsupported causal, GQA, or head-dimension configurations are recorded rather than replaced by another implementation.
+Neptune uses its official PyTorch 2.6/Triton 3.2 combination and an LLVM-enabled build.
+Build failures, compatibility failures, numerical rejections, and measured paths are distinct outcomes.
+
+The available hardware consists of Ampere A40 devices.
+FA3/FA4 and ComFuse variants requiring Hopper/Blackwell facilities are therefore discussed as related work rather than claimed A40 reproductions.
+Results from different compiler environments include matching in-environment baselines and are reported separately.
+
+\subsection{Complete small-model inference}
+\label{sec:small-system}
+
+Large checkpoints are unnecessary for testing whether the selector survives integration into a complete execution graph.
+We instantiate a six-layer Qwen3 architecture with hidden width 1024, intermediate width 3072, 16 query heads, eight KV heads, head dimension 64, an 8192-entry vocabulary, and tied embeddings.
+The model contains 83,900,160 parameters, uses fixed random weights, and downloads no pretrained checkpoint.
+The experiment measures architecture/runtime performance, not language-task accuracy.
+
+The adapter replaces the actual projection--residual-add--RMSNorm region while retaining attention, RoPE, the MLP, residual flow, the KV cache, and the output head.
+FP16 GEMM rounding is preserved through an explicit linear boundary; the compiled epilogue emulates the model's precision casts.
+Without this boundary, compiler addmm rewriting changes the residual rounding position and fails the component numerical gate.
+All admitted model variants pass full logits comparison on the same teacher-forced token history.
+
+PyTorch workloads use batch sizes 1 and 8, prompt lengths 128 and 2048, and 64 decode steps.
+All variants use the same outer default compilation configuration with internal CUDA Graphs disabled.
+The original compiled model, a fixed-native adapter, a fixed-compiled adapter, and default SCIC are measured separately.
+The fixed-native adapter exposes integration overhead; the fixed-compiled adapter tests whether adaptation is useful beyond a static choice.
+The complete-model measurements include the real adapter and dispatcher costs.
+
+Across the six device/process repetitions and four workloads, SCIC achieves host-time geometric-mean speed ratios of $0.870\times$ for prefill and $0.670\times$ for the 64-step decode loop relative to the original compiled model.
+Both ratios indicate slowdowns.
+The fixed-compiled adapter achieves $0.869\times$ and $0.675\times$, respectively.
+These results show that pilot subgraph ratios cannot be interpreted as complete-model acceleration.
+The opaque integration boundary and repeated runtime dispatch restrict the present implementation; calibration does not recover those costs.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_supplement_system.pdf}
+  \caption{Complete random-weight small-Qwen3 inference. Speedup uses synchronized host batches relative to the original compiled model; values below one are slowdowns. Error bars are process-level bootstrap intervals. The workload includes the KV cache and output head, but uses teacher-forced tokens and does not measure task accuracy.}
+  \label{fig:supplement-system}
+\end{figure*}
+
+\input{supplement_results}
+
+\input{vllm_results}
+
+\input{adapter_ablation}

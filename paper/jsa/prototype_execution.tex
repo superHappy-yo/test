@@ -1,0 +1,31 @@
+\subsection{Executable bindings and cache}
+
+The current executor initially binds MemMode to the default compiled chain and ComputeMode to the native chain.
+Both GEMM paths normalize the same FP16 product using FP32 RMSNorm statistics and weighting, then cast the final output to FP16.
+Attention always binds to compiled SDPA plus RMSNorm.
+A compiled-chain name does not establish that the matrix product and the complete normalization reduction occupy one kernel.
+
+Calibration scopes distinguish analytical-only, ridge-only, the default ridge-plus-compute policy, and all-GEMM probing, retaining the $0.5R/2R$ analytical rule.
+Cache entries use exact shape, strides, dtype, device, implementation identity, and device identity, alongside analytical bucket metadata.
+An unseen signature must be prepared before regular timing or graph capture.
+Every independently timed selector call invokes its actual chosen function.
+Controlled graph replay binds static input storage and rejects calls with different storage.
+
+\subsection{Complete-model integration}
+
+The integration site is the actual attention output projection followed by residual addition and RMSNorm.
+Attention, RoPE, the MLP, the KV cache, and the output head remain in the measured workload.
+An explicit FP16 linear boundary preserves the matrix-product rounding position, and the compiled epilogue emulates precision casts.
+HF and vLLM adapters are each validated against their own residual and normalization semantics; tolerances are not relaxed to mask a changed rounding contract.
+Each policy prepares exact signatures before regular timing and graph capture, and is compared separately with the unmodified model and fixed-policy adapters.
+
+\subsection{Correctness and timing obligations}
+
+Candidates must pass complete-output checks with multiple random seeds and a larger-magnitude GEMM input before measurement.
+The PyTorch model comparison additionally checks full logits on identical teacher-forced token histories.
+Numerical rejection, unavailable execution, and valid timings are distinct recorded outcomes.
+CUDA-event intervals and synchronized host batches are measured separately; preparation, calibration, and regular samples have separate records.
+
+Section~\ref{sec:eval} specifies the main shapes, software versions, sample counts, and system workloads.
+Legacy path names, copied selected medians, and split-region accounting are retained with the pilot protocol in Appendix~\ref{sec:pilot}.
+Kernel names and launch counts are not substituted for DRAM bytes or classification accuracy.

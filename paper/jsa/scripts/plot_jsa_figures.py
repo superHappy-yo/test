@@ -5,12 +5,11 @@ Reads only files already in the repository:
 
 - paper/data/a40/bench_gemm.csv
 - paper/data/a40/summary.json          (datasheet crossings)
-- paper/data/bakeoff_v4/bakeoff_latency.csv
-- paper/data/bakeoff_v4/bakeoff_decisions.csv
-- paper/data/bakeoff_v4/bakeoff_summary.json
+- paper/data/jsa_replication/run_01/bakeoff_latency.csv
+- paper/data/jsa_replication/run_01/bakeoff_decisions.csv
 
 The Roofline curve and the GEMM AI(M) curve use the same closed forms as
-shapefuse.intensity (cold-HBM bytes, 2 FLOPs per MAC). Markers on those
+shapefuse.intensity (cold off-chip bytes, 2 FLOPs per MAC). Markers on those
 curves are analytical_ai cells from bakeoff_decisions.csv. No latency is
 invented. Achieved arithmetic intensity is not plotted: Nsight DRAM bytes
 were not collected.
@@ -43,7 +42,7 @@ if str(REPO) not in sys.path:
 from shapefuse.intensity import square_proj_ai  # noqa: E402
 
 A40_DIR = REPO / "paper" / "data" / "a40"
-V4_DIR = REPO / "paper" / "data" / "bakeoff_v4"
+EVAL_DIR = REPO / "paper" / "data" / "jsa_replication" / "run_01"
 OUT = REPO / "paper" / "jsa" / "figures"
 
 # Okabe–Ito, print-friendly.
@@ -243,7 +242,7 @@ def plot_roofline(decisions: list[dict], summary_a40: dict) -> None:
 
 
 def plot_matmul(bench: list[dict]) -> None:
-    fig, ax = plt.subplots(figsize=(4.9, 3.25), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(3.6, 3.15), constrained_layout=True)
     regime_color = {
         "memory-bound": BLUE,
         "ridge-region": ORANGE,
@@ -273,7 +272,7 @@ def plot_matmul(bench: list[dict]) -> None:
 
 
 def plot_gemm_speedup(latency: dict[tuple[str, str, str], dict], decisions: list[dict]) -> None:
-    fig, ax = plt.subplots(figsize=(5.6, 3.35), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(3.6, 3.15), constrained_layout=True)
     by_label = {row["label"]: row for row in decisions if row["op"] == "matmul_rmsnorm"}
     ms = []
     series = {
@@ -292,12 +291,15 @@ def plot_gemm_speedup(latency: dict[tuple[str, str, str], dict], decisions: list
     ax.plot(ms, series["torch_compile_default"], "s--", color=SKY, ms=4, lw=0.9, label="torch.compile, separate timing")
     ax.plot(ms, series["always_unfuse"], "^-", color=ORANGE, ms=5, lw=1.1, label="always-unfuse (eager chain)")
     ax.plot(ms, series["scic_selected"], "D", color=GREEN, ms=6, lw=0, label="SCIC-selected (copied median)", zorder=4)
-    ax.axvspan(256, 512, color=BAND, zorder=0, alpha=0.9)
+    for left, right, first, second in zip(ms, ms[1:], GEMM_ORDER, GEMM_ORDER[1:]):
+        if by_label[first]["selected_baseline"] != by_label[second]["selected_baseline"]:
+            ax.axvspan(left, right, color=BAND, zorder=0, alpha=0.9)
     ax.set_xscale("log", base=2)
     ax.set_xlabel("$M$  ($N{=}K{=}4096$, MatMul+RMSNorm)")
     ax.set_ylabel("Speedup versus eager")
     ax.set_title("GEMM path selection on the idle A40")
-    ax.set_ylim(0.7, 1.32)
+    values = [value for path in series.values() for value in path]
+    ax.set_ylim(min(0.9, min(values) * 0.95), max(values) * 1.12)
     ax.legend(loc="upper left", frameon=False)
     ax.grid(True, which="major", axis="y", alpha=0.25, lw=0.4)
     _save(fig, "fig_gemm_plan_speedup")
@@ -323,7 +325,8 @@ def plot_attention(latency: dict[tuple[str, str, str], dict]) -> None:
     ax.set_title("(a) Library attention paths")
     ax.legend(frameon=False, loc="upper left", fontsize=7)
     ax.grid(True, axis="y", alpha=0.25, lw=0.4)
-    ax.set_ylim(0, 0.26)
+    ax.set_ylim(0, max(_f(latency[("attention", lab, key)], "median_ms")
+                       for lab in ATTN_ORDER for key, _, _ in paths) * 1.25)
 
     ax = axes[1]
     eager_sp = []
@@ -341,12 +344,12 @@ def plot_attention(latency: dict[tuple[str, str, str], dict]) -> None:
     ax.set_title("(b) Against score materialization")
     ax.legend(frameon=False, loc="upper left")
     ax.grid(True, axis="y", alpha=0.25, lw=0.4)
-    ax.set_ylim(0, 8.0)
+    ax.set_ylim(0, max(value for path in eager_sp for value in path) * 1.2)
     _save(fig, "fig_attn_library_paths")
 
 
 def plot_oracle(latency: dict[tuple[str, str, str], dict]) -> None:
-    fig, ax = plt.subplots(figsize=(5.5, 3.7), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(3.6, 3.8), constrained_layout=True)
     nice = {
         "decode_m1": "GEMM $M{=}1$",
         "decode_m32": "GEMM $M{=}32$",
@@ -380,7 +383,7 @@ def plot_oracle(latency: dict[tuple[str, str, str], dict]) -> None:
     ax.axvline(1.0, color=BLACK, lw=0.8)
     ax.set_yticks(list(y), [name for name, _, _ in rows_plot])
     ax.set_xlabel("SCIC latency / faster of fuse and unfuse")
-    ax.set_xlim(0.9, 1.85)
+    ax.set_xlim(0.9, max(gap for _, gap, _ in rows) * 1.12)
     ax.set_title("Gap to the two-path oracle")
     handles = [
         Patch(facecolor=BLUE, label="MatMul+RMSNorm"),
@@ -394,8 +397,8 @@ def plot_oracle(latency: dict[tuple[str, str, str], dict]) -> None:
 def main() -> None:
     _style()
     bench = _load_csv(A40_DIR / "bench_gemm.csv")
-    decisions = _load_csv(V4_DIR / "bakeoff_decisions.csv")
-    latency_rows = _load_csv(V4_DIR / "bakeoff_latency.csv")
+    decisions = _load_csv(EVAL_DIR / "bakeoff_decisions.csv")
+    latency_rows = _load_csv(EVAL_DIR / "bakeoff_latency.csv")
     summary_a40 = json.loads((A40_DIR / "summary.json").read_text())
     latency = _latency_index(latency_rows)
     plot_roofline(decisions, summary_a40)

@@ -1,3 +1,5 @@
+> Historical notes: the original eager FP16 RMSNorm can overflow. Do not use the legacy GEMM ratios below as equivalent-computation speedups. The validated submission sources are [main.tex](jsa/main.tex) and [jsa_main_zh.md](jsa/jsa_main_zh.md); current evidence is in [data/jsa_replication](data/jsa_replication/README.md).
+
 # Shape-conditioned intensity classification
 
 **Submission source:** [`paper/jsa/main.tex`](jsa/main.tex), an Elsevier `elsarticle` manuscript for the *Journal of Systems Architecture*. This note is the short English companion. Full-precision cells live in [`paper/data/bakeoff_v4/`](data/bakeoff_v4/) and [`paper/data/a40/`](data/a40/). Do not invent latencies, and do not quote an earlier bakeoff archive as if it were the idle-GPU run.

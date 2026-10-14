@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cmd",
         nargs="?",
         default="all",
-        choices=("all", "analytical", "bench", "plans", "selfcheck", "bakeoff"),
+        choices=("all", "analytical", "bench", "plans", "selfcheck", "bakeoff", "supplement"),
         help=(
             "all = tables + plans + figures + a matmul timing (default). "
             "bakeoff = wall-clock subgraph latency and the SCIC-selected path. "
@@ -32,6 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--out", default="results", help="Output directory")
+    parser.add_argument("--stage", choices=("operator", "research", "system", "all"), default="operator")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--graph-mode", choices=("none", "manual", "compiler"), default="none")
+    parser.add_argument("--case", default=None, help="Supplement: run one named shape or workload")
+    parser.add_argument("--methods", default=None, help="Supplement: comma-separated candidate names")
+    parser.add_argument("--framework", choices=("pytorch", "vllm"), default="pytorch")
+    parser.add_argument("--requests", type=int, default=128,
+                        help="Measured requests per vLLM workload; use a smaller value only for smoke checks")
     parser.add_argument(
         "--machine",
         default="H100_SXM_FP16",
@@ -153,6 +161,10 @@ def main(argv: list[str] | None = None) -> int:
         from shapefuse.bakeoff import main_bakeoff
 
         return main_bakeoff(args)
+    if args.cmd == "supplement":
+        from shapefuse.supplement import main_supplement
+
+        return main_supplement(args)
     from shapefuse.runner import run_command
 
     return run_command(args)

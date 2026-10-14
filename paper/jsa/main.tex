@@ -1,142 +1,218 @@
-\documentclass[preprint,12pt]{elsarticle}
+%%
+%% Copyright 2019-2024 Elsevier Ltd
+%%
+%% Version 2.4
+%%
+%% This file is part of the 'CAS Bundle'.
+%% --------------------------------------
+%%
+%% It may be distributed under the conditions of the LaTeX Project Public
+%% License, either version 1.2 of this license or (at your option) any
+%% later version.  The latest version of this license is in
+%%    http://www.latex-project.org/lppl.txt
+%% and version 1.2 or later is part of all distributions of LaTeX
+%% version 1999/12/01 or later.
+%%
+%% The list of all files belonging to the 'CAS Bundle' is
+%% given in the file `manifest.txt'.
+%%
+%% Template article for cas-dc documentclass for
+%% double column output.
 
-\usepackage{amsmath,amssymb}
-\usepackage{booktabs}
+%\documentclass[a4paper,fleqn,longmktitle]{cas-dc}
+\documentclass[a4paper,fleqn]{cas-dc}
+
+%\usepackage[authoryear,longnamesfirst]{natbib}
+%\usepackage[authoryear]{natbib}
+\usepackage[numbers]{natbib}
+
+\usepackage{amsmath,amssymb,amsfonts}
+% \usepackage{algorithmic}
+\usepackage{algorithm}
+% \usepackage{algorithmicx}
+\usepackage{algpseudocode}
 \usepackage{graphicx}
-\usepackage{hyperref}
+\usepackage{textcomp}
+\usepackage{multirow, multicol}
+\usepackage{subfigure}
+\usepackage{tabularx}
+\usepackage{diagbox}
+\usepackage{pifont}
+\usepackage{booktabs}
+\usepackage[switch]{lineno}
 \usepackage{url}
-\usepackage{xcolor}
+\usepackage{listings}
 
-\graphicspath{{figures/}}
-\hypersetup{colorlinks=true,linkcolor=black,citecolor=blue,urlcolor=blue}
+\providecommand{\DIFadd}[1]{\textcolor{blue}{#1}} % Must add this line in the new LaTeX document to make the newly added text use the same font as the old text.
 
-\journal{Journal of Systems Architecture}
-
-\newcommand{\AI}{\mathrm{AI}}
+%%%Author definitions
+\def\tsc#1{\csdef{#1}{\textsc{\lowercase{#1}}\xspace}}
+\tsc{WGM}
+\tsc{QE}
+\tsc{EP}
+\tsc{PMS}
+\tsc{BEC}
+\tsc{DE}
+%%%
 
 \begin{document}
 
-\begin{frontmatter}
+\let\WriteBookmarks\relax
+\def\floatpagepagefraction{1}
+\def\textpagefraction{.001}
+\shorttitle{Shape-Conditioned Intensity Classification for Dual-Plan Fusion in DNN Compilers}
+\shortauthors{Longlong Liao et~al.}
 
-\title{Shape-Conditioned Intensity Classification for Dual-Plan Fusion in DNN Compilers}
+\title [mode = title]{Shape-Conditioned Intensity Classification for Dual-Plan Fusion in DNN Compilers}
+% \tnotemark[1,2]
 
-\author[inst]{Happy Super}
-\ead{happy.super@example.com}
+% \tnotetext[1]{This document is the results of the research
+%    project funded by the National Science Foundation.}
 
-\affiliation[inst]{op={},organization={Affiliation TBD}}
+% \tnotetext[2]{The second title footnote which is a longer text matter
+%    to fill through the whole text width and overflow into
+%    another line in the footnotes area of the first page.}
+
+
+\author[aff1]{Longlong Liao}
+\ead{t20104@fzu.edu.cn}
+
+\author[aff2]{Xin Fang\corref{1}}
+\ead{202510194375@mail.scut.edu.cn}
+\cortext[1]{Corresponding author}
+
+\author[1]{Weihong Zheng}
+\ead{241027248@fzu.edu.cn}
+
+\author[aff1]{Yuanlong Yu}
+\ead{yu.yuanlong@fzu.edu.cn}
+
+\author[aff2]{Cen Chen}
+\ead{chencen@scut.edu.cn}
+
+
+\address[aff1]{College of Computer and Data Science, Fuzhou University, Fuzhou, China}
+\address[aff2]{Guangzhou International Campus, South China University of Technology, Guangzhou, China}
+\nonumnote{This work was supported by the National Natural Science Foundation of China (Grant No. U21A20471), and the Natural Science Foundation of Fujian Province (Grant No. 2025J01537).}
+
 
 \begin{abstract}
-Whether a tensor operator is compute-bound or memory-bound depends on its shape, its dtype, and which intermediates touch off-chip memory.
-On a cold-HBM accounting, a width-4096 FP16 GEMM moves from about one FLOP per byte at a single decode row to 1024 FLOP/byte at a 2048-row prefill.
-An IO-aware attention plan moves with sequence length.
-A plan that writes the score matrix does not.
-A fusion bit frozen by operator kind cannot follow those crossings.
-
-We describe a shape-conditioned intensity classifier (SCIC) that labels each producer--consumer site against a datasheet Roofline ridge, and a dual-plan selector that emits a memory-oriented plan (MemMode), a compute-oriented plan (ComputeMode), or both inside a band around the ridge.
-The executable prototype binds those plans to stock PyTorch paths.
-For MatMul+RMSNorm, a few-shot wall-clock probe chooses between the compiled chain and the eager chain.
-For attention, every regime calls PyTorch SDPA, and the epilogue policy compiles that operator together with RMSNorm.
-
-On an idle NVIDIA A40 the GEMM probe matches the faster of the two paths on all seven shapes.
-It raises the geometric-mean speedup versus eager from $0.921\times$, the datasheet primary, to $1.055\times$.
-The datasheet primary agrees with the probe on one shape.
-The attention policy is $1.43\times$ geometric mean against a score-materializing eager baseline, and on this run it is slower than eager library SDPA.
-Nsight DRAM counters returned \texttt{ERR\_NVGPUCTRPERM}.
-The evaluation reports subgraph wall-clock and logged decisions.
-Achieved arithmetic intensity, custom fused kernels, and end-to-end token rate are unmeasured.
+Operator fusion decisions depend on tensor shape, precision, and intermediate traffic.
+We present a shape-conditioned intensity classifier (SCIC) and a dual-plan interface for DNN compiler fusion planning.
+SCIC compares analytical arithmetic intensity with a datasheet Roofline ridge and recommends MemMode, ComputeMode, or both near that ridge.
+The prototype binds these abstract plans to stock execution paths and separates analytical recommendation from latency calibration.
+A correctness-gated evaluation covers 21 GEMM and nine attention shapes, optimized PyTorch/compiler/library baselines, recent fusion artifacts, and independently timed callable dispatch.
+Auditing an earlier pilot exposed FP16 normalization overflow and motivated explicit FP32 statistics.
+We integrate selection into a complete six-layer, 83.9-million-parameter random-weight Qwen3 architecture, preserving residual and FP16 rounding semantics.
+Across six device/process repetitions on two A40 GPUs, SCIC's host-time ratios relative to the original compiled model are $0.870\times$ for prefill and $0.670\times$ for 64-step decode.
+In actual vLLM 0.31.0 generation on one A40, its output-throughput ratio is $0.971\times$, with a process-bootstrap 95\% interval of $[0.961,0.978]$; all candidate request token hashes match the original engine.
+These regressions show that eager-relative subgraph gains do not establish system acceleration.
+Follow-up ablations locate integration costs; held-out projection rankings suggest local selection headroom, while measured model execution remains slower than the original.
+The study contributes an analytical planning interface and auditable executable evidence, while leaving custom intensity-guided kernel benefits open.
+Achieved DRAM intensity and pretrained task accuracy are not measured.
 \end{abstract}
 
-\begin{highlights}
-\item Shape-conditioned intensity labels GEMM and attention before fusion.
-\item A wall-clock probe picks the faster GEMM path on all seven A40 shapes.
-\item The datasheet primary matches that measured GEMM path on one shape.
-\item Compiled SDPA plus norm loses to eager SDPA on five shapes.
-\item Evidence is subgraph latency; DRAM performance counters were unavailable.
-\end{highlights}
+% \begin{graphicalabstract}
+% \includegraphics{figs/cas-grabs.pdf}
+% \end{graphicalabstract}
 
-\begin{keyword}
+% \begin{highlights}
+% \item Research highlights item 1
+% \item Research highlights item 2
+% \item Research highlights item 3
+% \end{highlights}
+
+\begin{keywords}
 DNN compilers \sep operator fusion \sep Roofline model \sep arithmetic intensity \sep GPU architecture \sep PyTorch
-\end{keyword}
+\end{keywords}
 
-\end{frontmatter}
-
+\maketitle
 \section{Introduction}
 \label{sec:intro}
 
-A fusion compiler that decides from operator adjacency alone is using the wrong feature.
-The same matrix product is a different machine regime at decode and at prefill, and the same attention block is a different regime when the score matrix stays on chip than when it is written out.
-We treat that fact as a scheduling problem for DNN compilers: classify the site from its shape and its traffic, keep more than one legal plan where the classification is uncertain, and select the executable plan from a measurement when the plans are existing compiler or library paths.
+Operator fusion can reduce kernel launches and intermediate memory traffic in deep neural network execution.
+Its performance also depends on the resources required by the fused computation: an epilogue may reduce data movement while changing the scheduling opportunities of its producer.
+Consequently, deciding whether to fuse a producer--consumer pair requires more information than the identities and adjacency of the operators.
+Tensor shape, data type, and the treatment of intermediates are relevant inputs to that decision.
 
-The classifier in this paper is analytical.
-Arithmetic intensity is FLOPs divided by a cold off-chip byte count, and the machine ridge is a datasheet peak, not a counter measurement.
-The three-way label is a policy band around that ridge.
-MemMode fuses the epilogue and prefers the memory side of the band.
-ComputeMode keeps the epilogue off the matrix-multiply mainloop and prefers the compute side.
-Inside the band the selector emits both plans.
-That interface is the systems contribution.
-It is the point at which a compiler can refuse a single frozen fusion bit.
+The distinction between decoding and prefilling illustrates this dependence.
+For a width-4096 FP16 projection, a cold off-chip traffic model gives approximately one FLOP per byte for a single decode row and 1024 FLOP/byte for 2048 prefill rows.
+Attention adds an algorithmic dimension: an IO-aware prefill plan can increase its intensity with sequence length, whereas a plan that materializes scores approaches a fixed intensity ceiling.
+These differences motivate a fusion interface that represents the resource regime of a concrete shape and can retain alternative plans near a predicted transition.
 
-The prototype that we time does not lower either plan to a custom kernel.
-MemMode and ComputeMode are bound to two PyTorch subgraphs.
-On MatMul+RMSNorm, \texttt{always\_fuse} is \texttt{torch.compile} of the chain and \texttt{always\_unfuse} is the eager chain.
-A few-shot median picks one of them.
-On attention, both sides call PyTorch's \texttt{scaled\_dot\_product\_attention}.
-The executable policy, \texttt{compile\_sdpa\_chain}, compiles SDPA together with RMSNorm in every regime, including regimes whose analytical primary would have split the epilogue.
-The selected latency copies the median of the chosen baseline.
-It does not include a plan-switch cost, because no separate dispatcher is timed.
+We propose a shape-conditioned intensity classifier (SCIC) and a dual-plan rule.
+SCIC computes analytical arithmetic intensity and compares it with a hardware-specific datasheet Roofline ridge.
+The rule produces MemMode for memory-oriented scheduling, ComputeMode for compute-oriented scheduling, or both within a configurable ridge band.
+These modes describe intended scheduling choices, including epilogue placement and tile preference.
+They are abstract plan templates. The original prototype evaluates stock-path bindings; the revised study in Section~\ref{sec:v2-method} tests five concrete projection schedules with an uncertainty-aware cost prior.
 
-The idle-GPU archive (\texttt{paper/data/bakeoff\_v4/}, package 0.3.1) is the measurement we quote.
-Across seven FP16 MatMul+RMSNorm shapes with $N{=}K{=}4096$, the probe selects the faster path every time, and that choice agrees with the datasheet primary only at $M{=}256$.
-The geometric mean moves from $0.921\times$ versus eager, if the datasheet primary is followed, to $1.055\times$ when the probe is followed.
-The switch from unfuse to fuse lies between $M{=}256$ and $M{=}512$, inside the ridge band of the A40 datasheet.
-Across five attention shapes the library policy is a different result.
-It beats a score-materializing eager baseline, and it loses to eager SDPA on every shape and to a split-norm SDPA path on four of the five.
-Section~\ref{sec:eval} reports those cells.
-It does not convert them into a claim about counter-based intensity.
+The prototype separates this analytical recommendation from executable path selection.
+For MatMul+RMSNorm, MemMode is initially associated with a \texttt{torch.compile} chain and ComputeMode with an eager chain.
+A latency probe can override that association within its configured scope: the pilot probes every GEMM shape, whereas the supplementary default probes ridge and compute regimes.
+For attention, both candidate paths delegate the attention computation to PyTorch SDPA, and the executable policy compiles SDPA together with RMSNorm in every regime.
+Thus the GEMM experiment evaluates calibrated selection, while the attention experiment evaluates a fixed library epilogue policy.
+Neither experiment implements the custom tiled schedules represented by the abstract modes.
+
+Numerical equivalence is also a prerequisite for interpreting path timings.
+Auditing the original FP16 MatMul+RMSNorm implementation revealed overflow in the eager square operation on six of seven shapes, while the compiled path avoided those collapsed outputs.
+We corrected the normalization to use explicit FP32 intermediates, validated complete outputs, and ran three new A40 processes.
+These corrected pilot runs remain available for provenance; the main evaluation adds stronger baselines, actual dispatcher timing, and complete-model integration.
+
+In the pilot primary corrected run, calibrated GEMM selection achieves $1.296\times$ geometric-mean speedup over eager, compared with $1.018\times$ for the analytical primary.
+The probe matches 20 of 21 regular-timing choices across the three runs.
+All probe choices compile the chain, and always-fuse achieves the same selected speedups, so this experiment does not establish a benefit over static compilation.
+For attention, compiled and eager SDPA rankings depend on the shape and run.
+The pilot evaluates recorded path rankings. The supplementary study measures executable selection against optimized static paths and validates a complete small-model adapter; its observed model slowdowns are reported directly.
+Follow-up adapter ablations distinguish invocation overhead from complementary strict-projection candidates, with unprofiled timing and held-out ranking checks.
+These earlier studies do not supply counter-based classification accuracy or custom tiled-schedule evidence. The revised study removes intensity-band candidate exclusions, prepares compiler-visible concrete schedules before outer compilation, and tests the analytical features against a matched no-AI ablation on held-out geometries.
 
 \paragraph{Contributions}
 \begin{enumerate}
-\item A shape-conditioned intensity classifier for GEMM, attention prefill and decode, norms, reductions, and ragged grouped GEMM, scored against datasheet ridges for H100 FP16, H100 FP8, A100 FP16, and A40 FP16.
-\item A dual-plan rule that emits MemMode, ComputeMode, or both, together with an executable binding of those plans onto PyTorch compile and library SDPA paths, including a few-shot wall-clock probe for every MatMul+RMSNorm shape.
-\item An idle-A40 evaluation of that binding against eager, \texttt{torch.compile}, max-autotune, always-fuse, and always-unfuse, with the gap to the faster of fuse and unfuse stated per shape.
+\item An analytical formulation of shape-conditioned intensity for GEMM, attention prefill and decode, norms, reductions, and ragged grouped GEMM, with datasheet anchors for H100 FP16, H100 FP8, A100 FP16, and A40 FP16.
+\item A dual-plan interface that separates regime classification and abstract plan generation from executable binding, together with a PyTorch prototype that calibrates MatMul+RMSNorm path selection.
+\item A correctness-gated evaluation on two A40 devices with optimized compiler/library baselines, independently timed dispatch, recent fusion artifacts, complete random-weight small-model inference, and controlled adapter diagnostics, reporting selection overhead, local candidate headroom, and observed system slowdowns.
 \end{enumerate}
 
-\paragraph{Outside this paper}
-The artifact emits no custom CUDA kernel for either plan, no Stage-Stream schedule~\cite{Mu2026ComFuse}, and no FlashAttention-3 kernel~\cite{Shah2024FlashAttention3}.
-The logged accuracy flag is false on every row.
-End-to-end tokens per second are not measured.
-A torch-profiler byte count from an earlier A40 package is not used as accuracy.
+Section~\ref{sec:background} introduces the resource model and planning problem.
+Section~\ref{sec:method} develops the intensity formulas and analytical rule.
+Section~\ref{sec:impl} describes executable binding and the measurement protocol, and Section~\ref{sec:eval} presents the results.
+Sections~\ref{sec:related} and~\ref{sec:limits} position the work and discuss its limitations.
 
-\section{Background}
+\section{Background and problem formulation}
 \label{sec:background}
 
-\subsection{Roofline as a classifier feature}
+\subsection{Roofline model and hardware anchors}
 \label{sec:roofline}
 
-Williams, Waterman, and Patterson define arithmetic intensity and the machine ridge~\cite{Williams2009Roofline}
+The Roofline model relates arithmetic intensity to the balance between computational throughput and memory bandwidth~\cite{Williams2009Roofline}.
+Arithmetic intensity $AI$ and the machine ridge $R$ are defined as
+
 \begin{equation}
-  \AI = \frac{\mathrm{FLOPs}}{\mathrm{bytes}}, \qquad
+  AI = \frac{\mathrm{FLOPs}}{\mathrm{bytes}}, \qquad
   R = \frac{\mathrm{peak\ FLOP/s}}{\mathrm{peak\ byte/s}}.
   \label{eq:roofline}
 \end{equation}
-A kernel with $\AI < R$ is bandwidth-limited on the classical Roofline.
-A kernel with $\AI > R$ is compute-limited.
-With no cache reuse, no launch cost, and no overlap, time is $\max(\mathrm{FLOPs}/P,\ \mathrm{bytes}/B)$.
-We use this model as a feature that a fusion planner can query.
-We do not use it as a latency predictor.
-The peaks in Table~\ref{tab:ridges} are public dense Tensor-Core numbers with structural sparsity left unused.
-None of them was measured on the A40 that produced Section~\ref{sec:eval}.
 
-\begin{table}[t]
+With peak compute throughput $P$ and peak bandwidth $B$, the classical model compares a compute-time estimate $\mathrm{FLOPs}/P$ with a transfer-time estimate $\mathrm{bytes}/B$ and takes the larger value.
+An intensity below $R$ lies on the bandwidth-limited side of that model, while an intensity above $R$ lies on its compute-limited side.
+This resource classification omits launch overhead, cache effects, and scheduling constraints.
+We therefore use intensity as a planning feature rather than a predictor of the latency of an arbitrary compiled subgraph.
+
+Table~\ref{tab:ridges} lists the datasheet anchors used by SCIC.
+The compute peaks are dense Tensor-Core values without structural sparsity.
+The A40 FP16 anchor is used for the executable evaluation; the other anchors support analytical comparisons only.
+None of the listed peaks or ridges is an experimentally measured value from the evaluation device.
+
+\begin{table*}[t]
   \centering
-  \caption{Datasheet anchors used by SCIC.
-  $R$ is peak FLOP/s divided by peak byte/s.
-  $M(0.5R)$, $M^{\star}$, and $M(2R)$ are the closed-form row counts at which a square projection $N{=}K{=}4096$ has $\AI$ equal to $0.5R$, $R$, and $2R$.
-  The FP8 row uses one-byte elements and the FP8 peak.
-  The evaluation machine flag is A40 FP16.}
+  \caption{Datasheet anchors for SCIC.
+$R$ is peak FLOP/s divided by peak byte/s.
+For a square projection with $N{=}K{=}4096$, $M(0.5R)$, $M^{\star}$, and $M(2R)$ are the row counts at which analytical intensity equals $0.5R$, $R$, and $2R$.
+The FP8 row uses one-byte elements and the FP8 peak.
+Only A40 FP16 is used for hardware measurements.}
   \label{tab:ridges}
   \footnotesize
-  \setlength{\tabcolsep}{4pt}
+  \setlength{\tabcolsep}{1pt}
   \begin{tabular}{@{}lrrrrrr@{}}
     \toprule
     Anchor & Peak & Memory & $R$ & $M(0.5R)$ & $M^{\star}$ & $M(2R)$ \\
@@ -148,153 +224,150 @@ None of them was measured on the A40 that produced Section~\ref{sec:eval}.
     A40 FP16 & 149.7 & 696 GB/s & 215.09 & 113.5 & 240.3 & 544.6 \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-SCIC does not threshold at the strict knee alone.
-A small error in the byte model or in $R$ flips a site that sits near $R$.
-The label is therefore a band, with the same knobs the prototype exposes:
-memory-bound if $\AI < 0.5R$,
-compute-bound if $\AI > 2R$,
-and ridge-region otherwise.
-The strict resource, bandwidth or compute, is reported beside the band.
-Figure~\ref{fig:roofline}(a) draws the A40 datasheet roof and the band.
-The markers are analytical intensities from the bakeoff decision log, placed on that roof.
-They are not achieved throughputs.
-
-\subsection{What the two plans mean}
+\subsection{Fusion planning and traffic assumptions}
 \label{sec:modes}
 
-MemMode fuses the epilogue into the producer, drops the intermediate off-chip round trip, and prefers a smaller tile.
-ComputeMode leaves a heavy epilogue outside the matrix-multiply mainloop, prefers a larger tile, and, for a GEMM-like producer, materializes the product.
-For attention, neither plan writes the score matrix.
-The plans differ in tile size and in whether a further epilogue joins the mainloop.
-Both descriptions are schedules a code generator could lower.
-In this artifact the flag \texttt{kernel\_emitted} is false on every decision row, so the names above are the classifier's vocabulary.
-Section~\ref{sec:impl} states what the bakeoff actually executes.
+We consider a producer followed by an epilogue, such as a matrix multiplication followed by RMSNorm.
+The planning problem is to choose how the producer and epilogue share an execution region under the resource demands of a concrete shape.
+MemMode represents a schedule that absorbs the epilogue into its producer, avoids an intermediate off-chip round trip, and prefers smaller tiles.
+ComputeMode represents a schedule that keeps a heavy epilogue outside the matrix-multiply mainloop and prefers larger tiles.
+For a GEMM-like producer, ComputeMode may materialize the product.
+For attention, both modes retain the score computation within an IO-aware plan; they differ in tile preference and the placement of a further epilogue.
 
-Bytes are a cold-HBM lower bound: each live tensor moves once.
-There is no L2 reuse, no causal mask, and no paged KV cache.
-A multiply-add counts as two FLOPs.
-These conventions fix the order of magnitude of the label.
-They are not an instruction trace.
+These descriptions define the plan vocabulary.
+They do not imply that a particular compiler or library call implements the requested tile schedule.
+The original prototype emits plan objects rather than custom kernels, and its executable bindings are specified separately in Section~\ref{sec:impl}. The concrete SCIC-v2 candidate pool is a separate, opt-in revision; it does not retrospectively change the original measurements.
 
-\section{Method}
+The analytical traffic model assumes cold off-chip inputs and explicitly counted writes and rereads of materialized intermediates.
+It excludes L2 reuse, causal masks, and paged KV caches, and counts a multiply-add as two FLOPs.
+The resulting byte counts describe an idealized traffic model rather than an instruction trace or the traffic of a warmed benchmark.
+The term off-chip memory is used throughout because the model also applies to the A40 evaluation device.
+
+\section{Shape-conditioned classification and plan selection}
 \label{sec:method}
 
-The method has two layers.
-SCIC assigns a regime from shape and traffic.
-The dual-plan rule turns that regime into one or two plans, and the bakeoff then binds each plan to a path that already exists in PyTorch.
+The analytical method first estimates FLOPs and bytes for a site, then assigns a regime relative to the selected hardware ridge, and finally constructs one or two abstract plans.
+Executable binding and latency calibration are separate steps described in Section~\ref{sec:impl}.
+This separation allows a measured path choice to change without treating it as a new arithmetic-intensity measurement.
 
-\subsection{GEMM intensity}
+\subsection{GEMM intensity and epilogue traffic}
 \label{sec:gemm-ai}
 
-For $C{=}AB$ with shapes $[M,K]$, $[K,N]$, and $[M,N]$,
+For $C{=}AB$ with shapes $[M,K]$, $[K,N]$, and $[M,N]$, let $e_A$, $e_B$, and $e_C$ denote element sizes in bytes.
+Reading both inputs and writing the output once gives
+
 \begin{equation}
   \mathrm{FLOPs} = 2MNK, \qquad
   \mathrm{bytes} = MK e_A + KN e_B + MN e_C.
   \label{eq:gemm}
 \end{equation}
-A square projection $N{=}K{=}d$ in uniform FP16 ($e{=}2$) collapses to
+
+For a square projection $N{=}K{=}d$ with uniform element size $e$ ($e{=}2$ for FP16), the intensity simplifies to
+
 \begin{equation}
-  \AI(M) = \frac{2Md}{(d + 2M)\,e}.
+  AI(M) = \frac{2Md}{(d + 2M)\,e}.
   \label{eq:square}
 \end{equation}
-Setting $\AI(M){=}t$ and solving for $M$ gives
+
+Solving $AI(M){=}t$ for the row count yields
+
 \begin{equation}
   M = \frac{t\, e\, d}{2(d - t\, e)} \quad (d > t\, e),
   \label{eq:mstar}
 \end{equation}
-which is the $M^{\star}$ column of Table~\ref{tab:ridges} when $t{=}R$.
-On the A40 FP16 anchor, $M^{\star}{=}240.3$, the memory edge is $M{=}113.5$, and the compute edge is $M{=}544.6$.
-Figure~\ref{fig:roofline}(b) plots Eq.~\eqref{eq:square} for $d{=}4096$.
-The colored markers are the seven bakeoff shapes.
-Their analytical intensities, read from \texttt{bakeoff\_decisions.csv}, run from $1.00$ at $M{=}1$ through $120$ at $M{=}128$ and $410$ at $M{=}512$ to $1024$ at $M{=}2048$ and $1365$ at $M{=}4096$.
-Decode and prefill of one linear layer are different labels on the same GPU.
 
-\begin{figure}[t]
+Setting $t{=}R$ gives the balance row $M^{\star}$ in Table~\ref{tab:ridges}.
+For the A40 FP16 anchor, $M^{\star}{=}240.3$; the row counts at $0.5R$ and $2R$ are $113.5$ and $544.6$.
+Figure~\ref{fig:roofline} shows the corresponding datasheet roof and the analytical intensity curve.
+For the seven MatMul+RMSNorm shapes, the logged producer intensities range from $1.00$ at $M{=}1$ to $1365$ at $M{=}4096$, passing through $120$ at $M{=}128$, $410$ at $M{=}512$, and $1024$ at $M{=}2048$.
+The same projection can therefore receive different analytical regime labels during decoding and prefilling.
+
+\begin{figure*}[t]
   \centering
-  \includegraphics[width=\linewidth]{fig_roofline_gemm.pdf}
-  \caption{Analytical intensity against the A40 datasheet, not a counter measurement.
-  (a)~Datasheet roof, $149.7$~TFLOP/s over $696$~GB/s.
-  Markers use \texttt{analytical\_ai} from the idle-GPU decision log and sit on the roof by construction.
-  (b)~Closed form Eq.~\eqref{eq:square} for $N{=}K{=}4096$, FP16.
-  Marker color is the wall-clock GEMM choice from the same log: unfuse at $M \in \{1,32,128,256\}$, fuse at $M \in \{512,2048,4096\}$.
-  $M^{\star}{=}240$ is the datasheet balance point.}
+  \includegraphics[width=\linewidth]{figures/fig_roofline_gemm.pdf}
+  \caption{Analytical intensity and the A40 datasheet Roofline.
+(a)~Datasheet roof based on $149.7$~TFLOP/s and $696$~GB/s, with the policy band used in Section~\ref{sec:selector}.
+Markers use \texttt{analytical\_ai} from the primary corrected decision log and are placed on the roof by construction; they are not achieved throughput measurements.
+(b)~Eq.~\eqref{eq:square} for $N{=}K{=}4096$, FP16.
+Marker color denotes the calibrated path in the primary corrected run, which selects compile on all seven shapes.
+$M^{\star}{=}240$ is the datasheet balance point.}
   \label{fig:roofline}
-\end{figure}
+\end{figure*}
 
-Fusing RMSNorm into that GEMM changes the byte count and does not change the GEMM FLOPs by much.
-Unfused traffic reads $A$ and $B$, writes $C$, rereads $C$, reads the norm weight, and writes the normalized result.
-Fused traffic drops the $C$ round trip.
-For the square FP16 projection the saved fraction of unfused bytes is $2M/(d+4M)$ up to the norm weight in the denominator.
-It grows with $M$: $0.05\%$ at $M{=}1$, $1.5\%$ at $M{=}32$, $10\%$ at $M{=}256$, $33\%$ at $M{=}2048$, and $40\%$ at $M{=}4096$.
-The strict Roofline ratio of the unfused accounting over the fused one, using the A40 datasheet and no launch term, is $1.06\times$ at $M{=}128$ and $1.00\times$ for every shape with $M \ge 512$, because both accountings are then compute-limited.
-Byte deletion at large $M$ does not move this model.
-Section~\ref{sec:eval} shows that the PyTorch paths do not follow that prediction.
+The producer intensity above is also the feature used to classify MatMul+RMSNorm; it is not the intensity of the complete chain.
+To examine the potential traffic benefit of epilogue fusion separately, the unfused chain reads $A$ and $B$, writes and rereads $C$, reads the norm weight, and writes the normalized result.
+An ideal fused schedule removes the write--read round trip of $C$, with only a small change in the FLOP count relative to GEMM.
+For the square FP16 projection, the saved fraction of unfused bytes is approximately $2M/(d+4M)$ when the norm-weight term is neglected.
+It increases from $0.05\%$ at $M{=}1$ and $1.5\%$ at $M{=}32$ to $10\%$ at $M{=}256$, $33\%$ at $M{=}2048$, and $40\%$ at $M{=}4096$.
 
-\subsection{Attention intensity}
+Removing these bytes does not imply the same reduction in Roofline time.
+With the A40 anchor and no launch term, the ratio of unfused to fused model times is $1.06\times$ at $M{=}128$ and $1.00\times$ at all tested shapes with $M \ge 512$, where both accountings are compute-limited.
+Section~\ref{sec:gemm-eval} compares this idealized prediction with the existing PyTorch paths without assuming that the compiled chain realizes the ideal fused schedule.
+
+\subsection{Attention prefill and decode}
 \label{sec:attn-ai}
 
 Let $Q,K,V$ have shape $[B,H,S,D]$.
-An IO-aware prefill that keeps scores on chip and moves $Q$, $K$, $V$, and the output once has
+For an IO-aware prefill plan, the leading FLOP count comes from the two matrix products.
+Assuming that scores remain on chip and that $Q$, $K$, $V$, and the output each move once, the corresponding intensity is
+
 \begin{equation}
-  \AI = S / e,
+  AI = S / e,
   \label{eq:fa}
 \end{equation}
-so the head dimension cancels.
-In FP16, $\AI{=}S/2$.
-The bakeoff shapes therefore have analytical prefill intensities 64, 256, and 1024 at sequence lengths 128, 512, and 2048.
-The A40 band labels those three sites memory-bound, ridge-region, and compute-bound.
 
-Writing the scores changes the asymptote.
-Charging three memory passes over the score tensor, intensity saturates at $4D/(3e)$ as $S$ grows.
-For $D{=}128$ and FP16 that ceiling is $85.3$ FLOP/byte, below $0.5R$ on the H100 FP16 anchor ($R{=}295$).
-Under this accounting, materializing scores keeps prefill memory-bound at every sequence length that fits the ceiling.
-Fusion here is not a constant-factor saving on top of a compute-bound kernel.
-It is the difference between a plan that can cross the ridge and a plan that cannot.
-The bakeoff's eager attention baseline materializes scores.
-Its SDPA baselines do not.
-A speedup of SDPA over that eager baseline mixes the library algorithm with the epilogue choice, and the tables below keep those comparisons separate.
+The head dimension cancels under these assumptions, and FP16 gives $AI{=}S/2$.
+The evaluated sequence lengths 128, 512, and 2048 consequently have analytical intensities 64, 256, and 1024, which fall in the A40 memory, ridge, and compute regimes.
+These are labels for the assumed IO-aware plan, not measurements of SDPA traffic.
 
-Decode fixes the query length at $S_q{=}1$ and grows the KV cache.
-As the cache length grows,
+Materializing the scores changes the asymptotic behavior.
+Charging three memory passes over the score tensor gives an intensity ceiling of $4D/(3e)$ as $S$ grows.
+For $D{=}128$ and FP16, that ceiling is $85.3$ FLOP/byte, below $0.5R$ for the H100 FP16 anchor ($R{=}295$).
+Under this accounting, score materialization prevents the prefill plan from reaching the compute regime of that anchor.
+The eager attention baseline explicitly materializes scores, whereas the SDPA paths delegate attention to the library.
+A comparison between these paths therefore combines the attention implementation with epilogue placement.
+The library backend and its realized traffic were not logged, so the analytical score-retention assumption is not independently validated by the benchmark.
+
+Decode instead fixes the query length at $S_q{=}1$ and grows the KV cache.
+For query and KV head counts $H_q$ and $H_{kv}$, the long-cache limit is
+
 \begin{equation}
-  \AI \to \frac{2 H_q}{H_{kv}\, e}.
+  AI \to \frac{2 H_q}{H_{kv}\, e}.
   \label{eq:decode}
 \end{equation}
-Multi-head attention in FP16 tends to $1$ FLOP/byte.
-Grouped-query attention~\cite{Ainslie2023GQA} with $H_q/H_{kv}{=}8$ tends to $8$, which is still below $0.5R$ on every anchor in Table~\ref{tab:ridges}.
-The two decode rows in the bakeoff are multi-head, $H{=}8$, $D{=}64$, and their logged intensities are $0.992$ and $1.000$.
-A ``compute-bound attention'' label is a statement about IO-aware prefill.
-It is the wrong label for decode.
 
-The analytical selector never sets \texttt{materialize\_intermediate} on an attention plan.
-ComputeMode on attention means large tiles and an epilogue that stays off the mainloop.
-It does not mean a return to writing scores.
+Multi-head attention in FP16 approaches $1$ FLOP/byte.
+Grouped-query attention~\cite{Ainslie2023GQA} with $H_q/H_{kv}{=}8$ approaches $8$ FLOP/byte, still below $0.5R$ for every anchor in Table~\ref{tab:ridges}.
+The two evaluated decode shapes use $H{=}8$ and $D{=}64$, with logged intensities $0.992$ and $1.000$.
+They remain analytically memory-bound even as cache length increases.
+Thus the compute-oriented prefill label should not be transferred to these decode workloads.
 
-\subsection{Norms and ragged grouped GEMM}
+The analytical attention plans never set \texttt{materialize\_\allowbreak intermediate}.
+Attention ComputeMode describes larger tiles and a further epilogue outside the mainloop; it preserves the IO-aware attention contract.
+
+\subsection{Norms, reductions, and ragged grouped GEMM}
 \label{sec:moe}
 
-RMSNorm, LayerNorm, softmax, residual add, and the other elementwise chains in the prototype are $O(1)$ FLOP/byte in FP16.
-SCIC labels them memory-bound and emits MemMode only.
-There is no compute-mode fission of a residual add.
-Softmax over a materialized score matrix is charged $5$ FLOPs per score and $3$ memory passes, so its intensity is $5/(3e)$ and does not depend on $S$.
+RMSNorm, LayerNorm, softmax, residual addition, and the other elementwise chains modeled by the prototype have $O(1)$ FLOP/byte in FP16.
+They are assigned MemMode without a separate compute-oriented template.
+For example, the model charges softmax on a materialized score matrix five FLOPs per score and three memory passes, giving intensity $5/(3e)$ independent of $S$.
+These operation-count conventions are summarized in Appendix~\ref{app:formulas}.
 
-Grouped GEMM is where one layer holds more than one regime.
-Expert $e$ computes $[t_e, H] \times [H, I]$.
-Table~\ref{tab:moe} evaluates the closed form at $H{=}4096$, $I{=}14336$, FP16, against the H100 FP16 ridge, with inactive experts left unloaded except in the last row.
-The skewed token histogram is the policy point: the $8$-token expert is memory-bound and the $1024$-token expert is compute-bound, while the token-weighted aggregate sits in the ridge band.
-A single epilogue template for the whole layer is the wrong granularity.
-The table is analytical.
-The bakeoff does not time a mixture-of-experts layer~\cite{Shazeer2017MoE}.
+Ragged grouped GEMM illustrates why a layer-level aggregate may be insufficient for planning.
+An expert with $t_e$ tokens computes $[t_e, H] \times [H, I]$.
+Table~\ref{tab:moe} evaluates this computation for $H{=}4096$, $I{=}14336$, and FP16 against the H100 FP16 ridge.
+Aggregate intensity is total FLOPs divided by total bytes across occupied experts, with inactive weights excluded except in the last row.
+In the skewed case, the 8-token expert is memory-bound and the 1024-token expert is compute-bound, while the aggregate remains in the ridge band.
+This analytical example motivates per-expert plan decisions rather than deriving a uniform template from the aggregate.
+No mixture-of-experts layer is timed in the executable evaluation~\cite{Shazeer2017MoE}.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
-  \caption{Analytical grouped-GEMM intensity.
-  $H{=}4096$, $I{=}14336$, FP16, H100 FP16 datasheet ridge.
-  Agg., min, and max are intensities in FLOP/byte.
-  Regimes use the occupied experts.
-  The last row adds seven cold weight matrices and no extra FLOPs.}
+  \caption{Analytical grouped-GEMM intensity for $H{=}4096$, $I{=}14336$, FP16, using the H100 FP16 datasheet ridge.
+Agg. is total FLOPs divided by total bytes; min and max are occupied-expert intensities, all in FLOP/byte.
+The last row additionally charges seven cold weight matrices without adding FLOPs.}
   \label{tab:moe}
   \footnotesize
   \setlength{\tabcolsep}{4pt}
@@ -310,450 +383,175 @@ The bakeoff does not time a mixture-of-experts layer~\cite{Shazeer2017MoE}.
     All eight weights move & 2048 & 237 & 1247 & 1247 & aggregate ridge \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{table*}
 
-\subsection{Dual-plan rule}
+\subsection{Analytical classification and dual-plan rule}
 \label{sec:selector}
 
-Given a site report, the selector applies four rules.
+SCIC uses a band around the ridge to limit sensitivity to small modeling errors near the strict Roofline balance point.
+The default thresholds are $0.5R$ and $2R$.
+These are configurable policy parameters rather than confidence bounds derived from measured uncertainty.
+The strict bandwidth or compute resource is reported alongside the three-way regime.
+Given the site report, analytical plan generation applies the following rules:
 \begin{enumerate}
-\item Elementwise chains, reductions, softmax, and norms emit MemMode only.
-\item A memory-bound site emits MemMode only.
-A compute-bound site emits ComputeMode only.
-\item A ridge-region site emits both plans.
-The primary is MemMode when $\AI < R$ and ComputeMode otherwise.
-\item Attention never materializes scores.
-On a library-SDPA bakeoff the executable epilogue policy is \texttt{compile\_sdpa\_chain} in every regime, recorded as \texttt{always\_fuse}, including when the analytical primary is ComputeMode and \texttt{fuse\_epilogue} is false.
+\item Elementwise chains, reductions, softmax, and norms produce MemMode only.
+\item Other sites produce MemMode only if $AI < 0.5R$, and ComputeMode only if $AI > 2R$.
+\item Sites within the ridge band produce both modes.
+The primary is MemMode when $AI < R$ and ComputeMode otherwise; the other mode is retained as an alternative.
+\item Attention plans preserve the IO-aware contract in either mode and never request score materialization.
 \end{enumerate}
-For GEMM, the analytical binding is MemMode $\rightarrow$ \texttt{always\_fuse} and ComputeMode $\rightarrow$ \texttt{always\_unfuse}.
-The ridge band still logs both plans.
-The bakeoff times one executable path.
 
-The GEMM path is then allowed to leave the analytical binding.
-With calibration scope \texttt{all-gemm}, every MatMul+RMSNorm shape is probed for one warmup and three iterations.
-The strictly faster median of \texttt{always\_fuse} and \texttt{always\_unfuse} is stored as \texttt{measured\_winner}.
-Ties and missing times keep the analytical path.
-The winner is a wall-clock comparison on the machine that runs the probe.
-It is not DRAM arithmetic intensity.
-The decision log marks that distinction as \texttt{WALLCLOCK\_CALIBRATION\_NOT\_DRAM\_AI}, and it records that GPU contention can flip the winner.
-Attention is excluded from the probe.
+The output is a plan recommendation, not an executable kernel or an observed bottleneck.
+In particular, the analytical rule alone offers no alternative outside the band.
+Calibration deliberately relaxes that restriction when choosing between existing library and compiler paths: the pilot uses all-GEMM calibration, and the supplementary default uses ridge-plus-compute calibration.
+Section~\ref{sec:scope} evaluates the consequences of limiting this calibration scope.
 
-Shape buckets for a plan cache are $1$, $2$--$8$, $9$--$32$, $33$--$128$, $129$--$512$, $513$--$2048$, $2049$--$8192$, and $8193+$.
-The key is kind, dtype, machine, and bucket.
-The bakeoff appends the shape label because that bucket would otherwise merge $M{=}256$ with $M{=}512$, which is the pair the measurement actually splits.
-
-\section{Implementation}
+\section{Prototype and experimental setup}
 \label{sec:impl}
 
-The prototype is a Python package, \texttt{shapefuse} 0.3.1, with a classifier, a plan object, and a CUDA bakeoff harness.
-\texttt{classify\_site} returns FLOPs, bytes, intensity, intensity over $R$, the three-way regime, and the strict Roofline resource.
-The source of the intensity remains \texttt{analytical} until a measured intensity is supplied.
-The A40 runs never supplied one.
-\texttt{select\_plan} implements Section~\ref{sec:selector} and returns \texttt{kernel\_emitted=false}.
+\subsection{Classifier and plan interfaces}
 
-The harness times two subgraphs.
+The prototype is a working-tree revision of the Python package \texttt{shapefuse} 0.3.1 with corrected normalization in the benchmark harness.
+\texttt{classify\_site} returns FLOPs, bytes, intensity, intensity divided by $R$, the three-way regime, and the strict Roofline resource.
+Its intensity source is \texttt{analytical} unless a measured intensity is supplied; none was supplied for the reported A40 runs.
+\texttt{select\_plan} implements Section~\ref{sec:selector} and returns an analytical primary, an optional alternative, and \texttt{kernel\_emitted=false}.
+Executable path names are defined below and summarized in Appendix~\ref{app:paths}.
 
-\paragraph{MatMul plus RMSNorm}
-$N{=}K{=}4096$, FP16, at seven row counts from $M{=}1$ to $M{=}4096$.
-The eager baseline and the unfuse path are the eager matrix product followed by RMSNorm.
-The default compile path and the fuse path are \texttt{torch.compile} of that chain, timed separately, so their medians need not match.
-Max-autotune is the same graph with \texttt{mode="max-autotune"} when the call returns.
-The compiled graph is not inspected.
-A compile-labelled row is evidence of a timed region, not evidence of a particular fusion pattern inside Inductor~\cite{Ansel2024PyTorch2}.
+\input{prototype_execution}
 
-\paragraph{Attention plus RMSNorm}
-The microbenchmark uses batch 1, eight heads, and head dimension 64.
-Prefill lengths are 128, 512, and 2048.
-Decode keeps a single query and uses cache lengths 128 and 2048.
-The eager baseline materializes scores in PyTorch and then applies RMSNorm.
-The SDPA baseline calls the library attention operator and then RMSNorm in one eager region.
-\texttt{always\_fuse} compiles that SDPA-plus-norm chain.
-\texttt{always\_unfuse} calls SDPA and times RMSNorm as a second region.
-The SDPA kernel that the library selected was not logged.
-The rows are PyTorch's library operator.
-They are not a FlashAttention-3 kernel from this repository, and they are not a claim about which backend SDPA dispatched to.
-
-\paragraph{Selected column}
-\texttt{scic\_selected} copies the median of the baseline named by the decision.
-On this run every GEMM decision is tagged measured wall-clock.
-Every attention decision is tagged library SDPA and copies the fuse path.
-Copying a median omits dispatch and plan-switch overhead.
-The regular timing used three warmups and ten iterations.
-The GEMM probe used one warmup and three.
-\texttt{RUN\_NOTES.txt} records that all seven probe winners matched the faster of the two regular-timing baselines.
-
-The run waited for two consecutive idle samples on the selected A40 before launching.
-The script start reported $0\%$ utilization and $4$~MiB allocated.
-A monitor that includes the benchmark peaked at $670$~MiB.
-PyTorch was 2.5.1+cu121, CUDA 12.1, Python 3.10.12.
-Dynamo's \texttt{cache\_size\_limit} was raised to $64$.
-The run notes record no cache-limit warning.
-Nsight Compute was not invoked.
-An earlier A40 package did invoke \texttt{ncu} and failed with \texttt{ERR\_NVGPUCTRPERM} because GPU performance counters were restricted.
-That failure is why achieved intensity is empty.
+\input{v2_method}
 
 \section{Evaluation}
 \label{sec:eval}
 
-The claim we test is narrow.
-On one idle A40, does the dual-plan binding pick a fast existing path, and where does that choice leave the datasheet label?
-The answer is different for GEMM and for attention.
-All latencies below are medians from the idle-GPU latency CSV.
-Speedup is the eager median divided by the row median.
-Values are rounded from the CSV.
-Geometric means use the unrounded speedups.
-Seventy-seven of seventy-seven latency rows completed.
-Twelve decisions were logged.
+The main evaluation measures real executable selection against optimized baselines and tests a complete small-model runtime.
+The corrected pilot, whose selected latencies copy baseline medians, is retained separately in Appendix~\ref{sec:pilot}.
+Its eager-relative ratios are historical evidence rather than system-level acceleration claims.
 
-\subsection{Shape dependence of a stock GEMM}
-\label{sec:matmul}
+\input{supplement_evaluation}
 
-Before any fusion comparison, a stock matrix product already changes throughput with $M$.
-Table~\ref{tab:matmul} and Figure~\ref{fig:matmul} are the seven-shape A40 sweep in \texttt{paper/data/a40/bench\_gemm.csv} (\texttt{PARTIAL\_VENDOR\_MATMUL}, machine flag \texttt{A40\_FP16}).
-The kernel is \texttt{pytorch\_matmul}.
-No fused plan was timed.
-From $M{=}1$ to $M{=}32$ the median stays near $0.07$--$0.08$~ms while the FLOP count grows by $32\times$, which is the launch-dominated end of a vendor GEMM.
-At $M{=}4096$ the same call reaches $115.4$~TFLOP/s, $77.1\%$ of the A40 datasheet peak of $149.7$~TFLOP/s.
-The curve supports shape dependence of achieved throughput.
-It does not locate a measured ridge, and the Nsight byte column on every row is empty.
-
-\begin{table}[t]
-  \centering
-  \caption{NVIDIA A40, stock \texttt{torch.matmul}, FP16, $N{=}K{=}4096$.
-  Medians and TFLOP/s from \texttt{bench\_gemm.csv}.
-  The band is the A40 datasheet band at the analytical intensity.
-  \texttt{achieved\_ai} is empty on every row.}
-  \label{tab:matmul}
-  \small
-  \begin{tabular}{@{}lrrrrl@{}}
-    \toprule
-    Label & $M$ & Median (ms) & TFLOP/s & $\AI$ & Band \\
-    \midrule
-    decode\_gemv & 1 & 0.0707 & 0.47 & 1.00 & memory \\
-    micro\_batch & 4 & 0.0786 & 1.71 & 3.99 & memory \\
-    decode\_batch32 & 32 & 0.0782 & 13.7 & 31.5 & memory \\
-    near\_mstar & 344 & 0.142 & 81.3 & 295 & ridge \\
-    ridge\_m512 & 512 & 0.179 & 96.1 & 410 & ridge \\
-    prefill\_m2048 & 2048 & 0.659 & 104.3 & 1024 & compute \\
-    square\_large & 4096 & 1.191 & 115.4 & 1365 & compute \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.78\linewidth]{fig_a40_torch_matmul_tflops.pdf}
-  \caption{Achieved TFLOP/s of stock \texttt{torch.matmul} on the A40 sweep.
-  The dashed line is the datasheet dense FP16 peak, $149.7$~TFLOP/s.
-  Point color is the datasheet band of the analytical intensity.
-  This is not a fused-plan comparison.}
-  \label{fig:matmul}
-\end{figure}
-
-\subsection{GEMM: the probe matches the faster path}
-\label{sec:gemm-eval}
-
-Table~\ref{tab:gemm} is MatMul+RMSNorm on the idle bakeoff.
-Figure~\ref{fig:gemm} plots the same speedups.
-For $M \le 256$, \texttt{torch.compile} of the chain is slower than the eager chain: $0.763\times$ to $0.940\times$ versus eager.
-For $M \ge 512$, the compiled chain is faster: $1.066\times$, $1.134\times$, and $1.187\times$.
-The probe selects unfuse on the first four shapes and fuse on the last three.
-Because the probe winner matched the faster regular-timing baseline on every GEMM shape, the copied SCIC median is the two-path oracle on this run.
-The latency ratio of SCIC to $\min(\texttt{always\_fuse},\texttt{always\_unfuse})$ is $1$ on all seven rows (Figure~\ref{fig:oracle}).
-
-\begin{table}[t]
-  \centering
-  \caption{MatMul+RMSNorm on the idle A40 (\texttt{bakeoff\_v4}).
-  $N{=}K{=}4096$.
-  Speedup is eager median divided by that path's median.
-  ``Datasheet'' is the analytical binding before the probe.
-  ``Selected'' is \texttt{measured\_winner}.
-  SCIC copies the selected median.
-  A separate \texttt{torch.compile} timing is within a few percent of the fuse column and is omitted here; it is the dashed line in Figure~\ref{fig:gemm}.}
-  \label{tab:gemm}
-  \footnotesize
-  \setlength{\tabcolsep}{3.5pt}
-  \begin{tabular}{@{}lrrllllrrr@{}}
-    \toprule
-    Shape & $M$ & $\AI$ & Band & Data. & Sel. & Eager & Fuse & Unfuse & SCIC \\
-          &     &       &      &       &      & (ms)  & $\times$ & $\times$ & $\times$ \\
-    \midrule
-    decode & 1 & 1.00 & memory & fuse & unfuse & 0.088 & 0.763 & 0.994 & 0.994 \\
-    decode & 32 & 31.5 & memory & fuse & unfuse & 0.100 & 0.840 & 0.999 & 0.999 \\
-    ridge & 128 & 120 & ridge & fuse & unfuse & 0.104 & 0.864 & 0.999 & 0.999 \\
-    ridge & 256 & 228 & ridge & unfuse & unfuse & 0.161 & 0.940 & 1.023 & 1.023 \\
-    ridge & 512 & 410 & ridge & unfuse & fuse & 0.240 & 1.066 & 1.000 & 1.066 \\
-    prefill & 2048 & 1024 & compute & unfuse & fuse & 0.874 & 1.134 & 1.000 & 1.134 \\
-    prefill & 4096 & 1365 & compute & unfuse & fuse & 1.627 & 1.187 & 0.991 & 1.187 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.92\linewidth]{fig_gemm_plan_speedup.pdf}
-  \caption{Idle-A40 speedup of MatMul+RMSNorm versus the eager chain.
-  The shaded interval is $M \in [256,512]$, where the measured winner changes.
-  Green markers copy the faster of fuse and unfuse.
-  \texttt{always\_fuse} and the separate \texttt{torch.compile} timing are two runs of the same compile recipe.}
-  \label{fig:gemm}
-\end{figure}
-
-The datasheet primary agrees with that oracle at $M{=}256$ only.
-On the memory side and at ridge $M{=}128$ it would have compiled a chain that is slower than eager.
-On ridge $M{=}512$ and on both prefill shapes it would have refused the compiled chain that is faster than eager.
-Following the primary yields a geometric mean of $0.921\times$ versus eager.
-Following the probe yields $1.055\times$.
-The ratio of those geometric means is $1.146\times$ on this shape set.
-Always-fuse alone is $0.959\times$ and always-unfuse alone is $1.001\times$, because each static policy eats the shapes where it is the slower path.
-Max-autotune is slower than eager on six of the seven shapes ($0.327\times$ at $M{=}1$ up to $0.954\times$ at $M{=}2048$) and $1.043\times$ at $M{=}4096$, still behind the fused median.
-
-Two readings of this table should stay separate.
-The first is empirical and is what we claim: for these two PyTorch paths, a three-iteration probe recovers the faster median, and the datasheet bit does not.
-The second is about the cold-byte model, and it is negative.
-At $M \ge 512$ that model gives a Roofline fusion speedup of $1.00\times$, because both the fused and the unfused byte counts are compute-limited, yet the compiled path is $1.07$--$1.19\times$ faster than eager.
-The measured gain is therefore not the $C$-matrix round trip in Section~\ref{sec:gemm-ai}.
-It may be a launch effect, a different GEMM schedule, or an epilogue overlap inside Inductor.
-The graph was not inspected, so the paper does not assign the gain to one of those causes.
-At $M \le 128$ the same model predicts a small byte win for fusion, and the compiled path is instead $0.763\times$ to $0.864\times$ versus eager.
-MemMode's advice to fuse a memory-bound GEMM is the wrong direction for this binding.
-
-The crossover itself sits where a dual plan is useful.
-$M{=}256$ ($\AI{=}228$, just above $R{=}215$) still prefers unfuse.
-$M{=}512$ ($\AI{=}410$, still below $2R{=}430$) prefers fuse.
-Both shapes are ridge-region, so the analytical rule already emits both plans there.
-The memory-side shapes are outside the band and would have received only MemMode.
-Probing them is what avoids the compile regression.
-Scope \texttt{all-gemm} is the setting that produced Table~\ref{tab:gemm}.
-
-\subsection{Attention: the library policy is not the faster path}
-\label{sec:attn-eval}
-
-Table~\ref{tab:attn} and Figure~\ref{fig:attn} are the five attention shapes from the same run.
-Every decision copies \texttt{always\_fuse}.
-Against the score-materializing eager baseline, that choice is $1.187\times$, $0.920\times$, $5.588\times$, $1.122\times$, and $0.880\times$.
-The geometric mean is $1.432\times$.
-Most of the mean is the $S{=}2048$ prefill, where materializing scores costs about $1.07$~ms and every SDPA path costs about $0.16$--$0.19$~ms.
-That gap is the library operator against a materialized score baseline.
-It is not a comparison of epilogue policies.
-
-\begin{table}[t]
-  \centering
-  \caption{Attention+RMSNorm on the idle A40.
-  $B{=}1$, $H{=}8$, $D{=}64$.
-  Eager materializes scores.
-  SDPA, unfuse, and fuse all call library \texttt{scaled\_dot\_product\_attention}.
-  Unfuse times RMSNorm as a second region.
-  Fuse compiles SDPA and RMSNorm together.
-  SCIC copies fuse on every row (\texttt{compile\_sdpa\_chain}).
-  The SDPA kernel backend was not logged.}
-  \label{tab:attn}
-  \footnotesize
-  \setlength{\tabcolsep}{3.5pt}
-  \begin{tabular}{@{}llrrlrrrr@{}}
-    \toprule
-    Shape & Len. & $\AI$ & Band & Primary & Eager & SDPA & Unfuse & Fuse \\
-          &      &       &      &         & (ms)  & $\times$ & $\times$ & $\times$ \\
-    \midrule
-    Prefill & $S{=}128$ & 64 & memory & Mem & 0.153 & 1.599 & 1.528 & 1.187 \\
-    Prefill & $S{=}512$ & 256 & ridge & Comp & 0.157 & 1.507 & 1.456 & 0.920 \\
-    Prefill & $S{=}2048$ & 1024 & compute & Comp & 1.072 & 6.865 & 5.584 & 5.588 \\
-    Decode & $S_k{=}128$ & 0.992 & memory & Mem & 0.150 & 1.579 & 1.489 & 1.122 \\
-    Decode & $S_k{=}2048$ & 1.000 & memory & Mem & 0.150 & 1.466 & 1.428 & 0.880 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{fig_attn_library_paths.pdf}
-  \caption{Idle-A40 attention.
-  (a)~Latency of the three library paths.
-  The selected bar is the compiled chain.
-  (b)~Speedup against the score-materializing eager baseline.
-  The $S{=}2048$ peak is the library operator against materialized scores.
-  Eager SDPA is the fastest bar or marker on every shape.}
-  \label{fig:attn}
-\end{figure}
-
-Among the library paths the ranking is stable and unfavorable to the selected policy.
-Eager SDPA is faster than the compiled chain on all five shapes.
-The latency ratio of the compiled chain to eager SDPA runs from $1.23\times$ at $S{=}2048$ to $1.67\times$ at decode $S_k{=}2048$, with geometric mean $1.45\times$.
-Splitting RMSNorm off SDPA is within $6\%$ of eager SDPA on four shapes and $1.23\times$ slower at $S{=}2048$.
-Against the two-path choice the prototype is allowed to copy, fuse versus unfuse, the compiled chain is slower by $1.287\times$, $1.583\times$, $1.000\times$, $1.327\times$, and $1.622\times$.
-The $S{=}2048$ pair differs by $0.13\,\mu\mathrm{s}$ ($0.07\%$), so that row is a tie for any decision this harness can justify.
-The geometric mean of the five ratios is $1.344\times$.
-Figure~\ref{fig:oracle} shows the contrast with GEMM: the GEMM bars sit on $1$, and four attention bars do not.
-
-The analytical primary does not rescue the policy.
-Prefill $S{=}512$ and $S{=}2048$ are ComputeMode, with \texttt{fuse\_epilogue} false, which would have split a further epilogue on a custom mainloop.
-The executable rule overrides that bit and compiles the chain anyway, because an earlier busy-GPU archive had found the split slower when the analytical rule was followed literally.
-On this idle GPU the override is the slower library placement.
-Decode is MemMode, so the analytical primary and the library policy agree with each other, and both disagree with the faster timed path.
-The data do not support a rule of the form ``fuse prefill, unfuse decode.''
-Both decode shapes prefer the split, and the long prefill is a tie between split and compile, with eager SDPA ahead of both.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.86\linewidth]{fig_oracle_gap.pdf}
-  \caption{Latency of the selected path divided by the faster of \texttt{always\_fuse} and \texttt{always\_unfuse}, using the regular ten-iteration medians.
-  GEMM sits on $1$ because the wall-clock probe matched that minimum.
-  Attention copies the compiled chain and meets the minimum only at $S{=}2048$, where the two medians differ by $0.07\%$.}
-  \label{fig:oracle}
-\end{figure}
-
-\subsection{What the geometric means say}
-\label{sec:summary}
-
-Table~\ref{tab:summary} collects the shape-set geometric means.
-On GEMM, the calibrated selector is the two-path oracle and is ahead of either static policy.
-On attention, the selector is identical to always-fuse, the two-path oracle is the split-norm path, and eager SDPA is ahead of both.
-We report these means as summaries of twelve microbenchmarks.
-They are not a model-level speedup.
-
-\begin{table}[t]
-  \centering
-  \caption{Geometric mean of per-shape speedups versus the eager baseline in the idle-GPU bakeoff.
-  The eager attention baseline materializes scores, so the attention column mixes the library operator with the epilogue.
-  Gap is the geometric mean of selected latency divided by the faster of fuse and unfuse, listed as GEMM / attention.
-  A gap of $1$ means the selector matched that minimum.
-  The gap cell is filled only for the selected policy.}
-  \label{tab:summary}
-  \small
-  \setlength{\tabcolsep}{5pt}
-  \begin{tabular}{@{}lccc@{}}
-    \toprule
-    Policy & GEMM ($n{=}7$) & Attention ($n{=}5$) & Gap \\
-    \midrule
-    Always fuse & 0.959 & 1.432 & --- \\
-    Always unfuse & 1.001 & 1.925 & --- \\
-    Datasheet primary & 0.921 & --- & --- \\
-    Eager SDPA & --- & 2.073 & --- \\
-    SCIC-selected & 1.055 & 1.432 & 1.000 / 1.344 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-The attention datasheet primary is not a single baseline name: the library override forces the executable path to fuse even when \texttt{fuse\_epilogue} is false, which is why that cell is left blank.
-The GEMM datasheet row is well defined and is the quantity the probe improves on.
-
-\subsection{What this run does not inherit from earlier archives}
-\label{sec:archives}
-
-Two earlier Docker archives used the same shape list on A40 cards that were not idle.
-\texttt{paper/data/bakeoff/} recorded about $77$--$83\%$ utilization at startup and applied the analytical attention rule, which split RMSNorm off SDPA at prefill $S \in \{512,2048\}$.
-\texttt{paper/data/bakeoff\_v2/} recorded $92\%$ utilization and $13490$~MiB already allocated on the selected GPU.
-It introduced \texttt{compile\_sdpa\_chain} and still bound GEMM ComputeMode to \texttt{always\_unfuse}, with no wall-clock probe.
-We do not compare milliseconds across those archives.
-Load moves the medians, and the notes for the calibrated run say explicitly that contention can flip \texttt{measured\_winner}.
-The decision difference is enough: the uncalibrated GEMM binding copies unfuse at $M \in \{256,512,2048,4096\}$, and the idle probe copies fuse at the last three of those four.
-Quoted speedups in this section come only from the idle archive.
+\input{v2_evaluation}
 
 \section{Related work}
 \label{sec:related}
 
-\paragraph{Roofline}
-The intensity--ridge picture is Williams et al.~\cite{Williams2009Roofline}.
-Hierarchical and instruction-level extensions exist; we stay with the classical ridge because the quantity we need is a per-site label, and because we do not have the counters a hierarchical model would consume.
-The datasheet substitution for $P$ and $B$ is a limitation of the present evidence, not a variant of the model.
+\paragraph{Resource modeling}
+SCIC uses the classical Roofline formulation of Williams et al.~\cite{Williams2009Roofline} to produce a per-site planning feature.
+The contribution is the use of shape-dependent traffic in the plan interface, rather than a new Roofline model.
+Using datasheet values in place of measured throughput and bandwidth limits the interpretation of the resulting labels.
 
 \paragraph{IO-aware attention}
-FlashAttention keeps the score tile on chip and changes both traffic and the kernel that implements attention~\cite{Dao2022FlashAttention,Dao2023FlashAttention2}.
-FlashAttention-3 pushes that schedule onto Hopper asynchrony and low precision~\cite{Shah2024FlashAttention3}.
-SCIC treats an IO-aware plan as one schedule that can be labeled, and a score-materializing plan as another.
-The bakeoff calls PyTorch SDPA.
-Which of those algorithms the library ran is not in the log.
+FlashAttention and FlashAttention-2 organize attention around on-chip score processing to reduce memory traffic~\cite{Dao2022FlashAttention,Dao2023FlashAttention2}.
+FlashAttention-3 further targets Hopper execution and low precision~\cite{Shah2024FlashAttention3}.
+These systems implement attention kernels, while SCIC uses the distinction between IO-aware and score-materializing plans as an analytical input.
+The pilot did not identify the selected SDPA backend. The supplementary artifact records available backend/kernel traces and measures a separate FlashAttention-2 path; names and traces alone do not measure its DRAM traffic.
 
-\paragraph{Joint fusion}
-ComFuse fuses matrix multiplication with memory-intensive epilogue subgraphs and lowers the result through a Stage-Stream execution model onto CUTLASS~\cite{Mu2026ComFuse,NVIDIACutlass}.
-On its self-attention case, TorchInductor's FlashAttention library path outperforms the fused schedule, because the softmax stage does not hide behind the matrix product.
-We read that case as evidence that one joint epilogue schedule is the wrong interface for attention.
-We do not implement Stage-Stream, and we do not reproduce ComFuse's kernels.
-RedFuser derives fused forms for cascaded reductions and generates GPU kernels, including attention-like patterns, on top of TVM~\cite{Tang2026RedFuser,Chen2018TVM}.
-Neptune breaks selected reduction dependences and repairs them algebraically, recovering FlashAttention-like and FlashDecoding-like schedules from plain attention code~\cite{Zhao2026Neptune}.
-Those systems emit kernels.
-This paper stops at the regime label and at a choice among PyTorch paths.
+\paragraph{Fusion and reduction scheduling}
+ComFuse combines matrix multiplication with memory-intensive epilogue subgraphs and lowers schedules through a Stage-Stream model onto CUTLASS~\cite{Mu2026ComFuse,NVIDIACutlass}.
+RedFuser generates fused forms for cascaded reductions, including attention-like patterns, using TVM~\cite{Tang2026RedFuser,Chen2018TVM}.
+Neptune uses algebraic transformations of reduction dependences to recover locality and parallelism in attention and related GPU computations~\cite{Zhao2026Neptune}.
+These approaches construct executable kernels or schedules.
+SCIC produces analytical plan recommendations and selects executable paths. The supplementary study evaluates available research attention artifacts separately, including a rejected RedFuser regeneration; it does not claim to reproduce their published aggregate speedups.
 
 \paragraph{Fusion granularity}
-FuseFlow shows that full cross-expression fusion is not always the best granularity for sparse models on streaming dataflow hardware~\cite{Lacouture2026FuseFlow}.
-The axis there is how large a fused region should be.
-The axis here is which side of a dense-GPU ridge a concrete shape sits on.
-The two questions are compatible and they are not the same experiment.
+FuseFlow studies fusion granularity for sparse models on streaming dataflow hardware~\cite{Lacouture2026FuseFlow}.
+SCIC addresses the resource regime of concrete dense-GPU shapes.
+Both settings motivate choices among different execution regions, but the workloads and hardware evaluated here do not permit a direct performance comparison.
 
-\paragraph{Compiler stacks}
-TorchDynamo and TorchInductor are the \texttt{torch.compile} implementation we time~\cite{Ansel2024PyTorch2}.
-Inductor lowers GPU graphs through Triton~\cite{Tillet2019Triton}.
-Dynamic shapes expose symbolic dimensions.
-They do not, in the bakeoff we ran, substitute for a measured choice between the compiled epilogue and the eager chain: the datasheet label and the faster path disagree on six of seven GEMM shapes.
-We have not modified Inductor's fusion heuristics.
-A prototype that fed the regime and the probed winner into those heuristics is future work.
+\paragraph{Compiler infrastructure}
+TorchDynamo and TorchInductor provide the \texttt{torch.compile} execution paths in the prototype~\cite{Ansel2024PyTorch2}, with Triton as part of GPU code generation~\cite{Tillet2019Triton}.
+Our harness compares their compiled chain with eager execution rather than modifying compiler fusion heuristics.
+The observed disagreements with the analytical binding motivate testing how regime features and measured choices could inform those heuristics; the current experiment does not evaluate that integration.
 
-\section{Limitations}
+\section{Discussion and limitations}
 \label{sec:limits}
 
-The ridge is a datasheet number.
-\texttt{measured\_ridge\_flops\_per\_byte} is null.
-A device-to-device copy probe in the earlier A40 package is archived as \texttt{ESTIMATE\_COPY\_NOT\_NSIGHT} and is not a substitute for that ridge.
+\subsection{Interpretation of analytical labels}
 
-Nsight DRAM bytes were not collected.
-The attempt that did run \texttt{ncu} failed with \texttt{ERR\_NVGPUCTRPERM}.
-A torch-profiler memory estimate on the stock matmul sweep equals the FP16 output matrix, so the implied intensity sticks at $K{=}4096$ and labels every shape compute-bound.
-That estimate agrees with the analytical regime on two of the seven shapes.
-The archive marks the rate as not valid SCIC accuracy.
-We do not report it as classifier accuracy.
-\texttt{quote\_as\_scic\_accuracy} remains false.
+The datasheet ridge is a reference value, and \texttt{measured\_\allowbreak ridge\_\allowbreak flops\_\allowbreak per\_\allowbreak byte} remains null.
+A device-copy estimate in an earlier A40 package is marked \texttt{ESTIMATE\_\allowbreak COPY\_\allowbreak NOT\_\allowbreak NSIGHT} and does not measure that ridge.
+The cold-byte model omits cache reuse, masks, paged KV access, and eager FP32 conversion temporaries, while the $0.5R$/$2R$ band and the softmax and RMSNorm operation counts are modeling choices.
+No threshold sensitivity experiment establishes an optimal band.
+The scope replay varies which recorded choices are used, not the accuracy of a measured resource classification.
 
-\texttt{scic\_selected} copies a baseline median.
-Plan-switch cost on a length trace is unmeasured.
-No MemMode or ComputeMode kernel was written, so the names in Section~\ref{sec:modes} have not been tested as tile shapes, register pressure, or shared-memory occupancy.
-The $0.5R$/$2R$ band is a knob.
-The softmax and RMSNorm flop constants are conventions.
-The cold-byte model omits L2, masks, and paged KV.
+The GEMM results expose a distinction between resource-oriented schedules and their executable proxies.
+The MemMode/ComputeMode templates have not been tested as concrete tile sizes, register allocations, or shared-memory occupancies.
+The all-GEMM ablation can select either existing path irrespective of the analytical regime.
+Its measured outcomes evaluate candidate ranking and calibration coverage; they do not establish an incremental benefit of the analytical feature over empirical calibration.
+The follow-up strict-projection candidates have complementary winning regions, but their held-out ranking gain excludes runtime dispatch and preparation costs (Section~\ref{sec:adapter-ablation}).
+The grouped-GEMM examples and the H100/A100 anchors remain analytical results.
 
-The quoted bakeoff is one idle A40, one software stack, and one run of each shape.
-A busy GPU can change the GEMM winner; the earlier archives are the evidence that the machine state matters, and they are not pooled with these medians.
-Attention was not calibrated, and on this idle run the uncalibrated library policy is slower than eager SDPA.
-Graphs were not inspected, so a compile speedup or regression is not yet a fusion recipe.
-Fusion-proxy timings in the A40 package are marked as proxy timings rather than fusion speedups, and they are not results of this paper.
-End-to-end tokens per second are not measured.
+\subsection{Measurement scope}
+
+No Nsight DRAM bytes were collected for the latency bakeoffs.
+The earlier \texttt{ncu} attempt failed with \texttt{ERR\_NVGPUCTRPERM}.
+A torch-profiler memory estimate from the separate stock-matmul archive equals the FP16 output-matrix size, causing its implied intensity to remain at $K{=}4096$ and classify every shape as compute-bound.
+Agreement of that estimate with the analytical label on two of seven shapes is not a valid accuracy measurement.
+The artifact therefore retains \texttt{quote\_\allowbreak as\_\allowbreak scic\_\allowbreak accuracy=false}.
+
+The pilot selected latency copies a baseline measurement and excludes dispatch, switching, compilation, and calibration costs.
+Its split-attention result sums separately warmed medians.
+The supplementary executor instead measures its real calls and complete chains, records calibration cost, and inspects available backend/kernel traces.
+Kernel names and launch counts do not substitute for isolated DRAM traffic or establish the causal benefit of fusion.
+The earlier operator archive inspects kernels with a profiler before timing candidates in the same process.
+The follow-up detects persistent post-profiler timing changes in its PyTorch 2.5.1 environment, so those earlier operator observations retain their instrumentation context and are not pooled with the new unprofiled matrix.
+Every process in the final follow-up latency matrix excludes profiler initialization; separate diagnostic traces describe execution structure.
+The original prototype emits no custom MemMode or ComputeMode kernels, no Stage-Stream schedule, and no FlashAttention-3 kernel. SCIC-v2 adds concrete Triton split-projection and cuBLAS/Triton epilogue candidates, without claiming that the abstract regime labels establish their optimality.
+Fusion-proxy timings in the earlier A40 package are not used as fusion results here.
+Complete random-weight small-model prefill, decode, and actual vLLM generation are measured; pretrained task accuracy, production request distributions, and cross-architecture model performance remain outside this evaluation.
+
+\subsection{GPU conditions and generalization}
+\label{sec:archives}
+
+The corrected pilot consists of three processes on one A40 with seed-0 inputs.
+The supplementary protocol expands shapes, software baselines, seeds, and device/process repetitions, but both GPUs are A40s.
+The vLLM serving study uses three repetitions on one available A40 because the other device did not meet the idle gate.
+The earlier small model uses random weights and controlled token lengths. The revised study additionally loads a pinned pretrained Qwen3-0.6B checkpoint; controlled inference and output-equivalence checks still do not establish task accuracy or generalization to production distributions.
+Short probes can disagree with regular medians near a tie, as the pilot $M{=}128$ result shows.
+Median timing and repetition do not supply a comprehensive uncertainty model.
+
+Earlier archives remain available for provenance and are not pooled with the corrected results.
+The original \texttt{bakeoff\_v4} and initial supplemental GEMM runs used the overflow-prone normalization; the earlier busy-GPU archives also differ in load and policy.
+Their rankings cannot substantiate a validated fusion crossover or a causal contention effect.
+The separate stock-matmul sweep does not use RMSNorm and is unaffected by this correction.
+
+Further work should measure isolated DRAM traffic and device-specific resource limits, broaden numerically admitted schedule coverage, and evaluate the resulting kernels on production serving traces.
+Attention calibration should include eager SDPA and consistently measured complete chains.
+The current results do not demonstrate an advantage of calibrated GEMM selection over always compiling, or of abstract dual-plan generation over existing compiler heuristics.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-Shape decides which side of a Roofline ridge a GEMM or an attention site occupies, so a fusion planner needs a label that sees the shape and a scheduler that is allowed to keep two plans.
-SCIC is that label, computed from closed-form traffic and a datasheet ridge.
-The dual-plan rule is that scheduler, in miniature: MemMode, ComputeMode, or both inside the band.
-
-Binding the plans to stock PyTorch paths changes what the label is allowed to mean.
-On an idle A40, a few-shot wall-clock probe selects the faster of \texttt{torch.compile} and the eager MatMul+RMSNorm chain on all seven shapes, and the datasheet primary matches that choice once.
-The same run's attention policy compiles library SDPA together with RMSNorm in every regime.
-That policy beats a score-materializing baseline and loses to eager SDPA.
-The honest reading is that intensity classification is the right compiler feature, and that a datasheet primary is not, by itself, the executable decision when the fused path is someone else's kernel.
-
-The measurements that would tighten the label are still open: isolated DRAM bytes, a ridge measured on the card, kernels that actually implement the two tile regimes, and a serving trace that pays for switching plans.
-Until those exist, the result to carry forward is the one in Table~\ref{tab:gemm} and Table~\ref{tab:attn}.
-Classify the shape.
-Keep both plans where the knee is uncertain.
-Time the paths you can actually run.
+SCIC and the dual-plan interface express shape-dependent fusion recommendations from analytical traffic and a hardware-specific Roofline ridge.
+Numerical equivalence, executable path selection, and complete-runtime performance are separate validation obligations.
+The corrected pilot removes FP16 normalization overflow, but its eager-relative gains also occur under static compilation.
+The supplementary evaluation measures real dispatch and stronger baselines rather than inferring selector performance from another path's timing.
+In the complete random-weight small-model experiment, SCIC achieves $0.870\times$ prefill and $0.670\times$ decode speed ratios relative to the original compiled model, establishing a regression under the tested integration.
+Actual vLLM generation likewise yields a $0.971\times$ throughput ratio, with a process-bootstrap interval of $[0.961,0.978]$, despite identical generated-token hashes.
+Thus the current binding does not demonstrate aggregate system acceleration or a benefit over established compiler heuristics.
+Unprofiled follow-up diagnostics partially recover integration losses through static strict inlining, reaching $0.973\times$ prefill and $0.897\times$ decode relative to their original-model control.
+Known-shape, leave-one-seed-out projection selection yields $1.150\times$ host and $1.127\times$ event ratios over fixed compilation, excluding dispatch and calibration; this motivates testing calibration coverage and integration jointly rather than treating a local ranking gain as system acceleration.
+The analytical interface remains a candidate planning feature; validating its kernel-generation value requires concrete alternative schedules and measurements of their realized resource use.
 
 \section*{Data availability}
-The decision log, the latency log, and the run notes quoted above are \texttt{paper/data/bakeoff\_v4/}.
-The stock matmul sweep is \texttt{paper/data/a40/}.
-The figures are regenerated from those files by the plotting script in this paper directory.
-No latency in Section~\ref{sec:eval} was typed in from a source other than those CSVs.
+Executed supplementary measurements and manifests are in \path{paper/data/jsa_supplement/}.
+The unprofiled adapter matrix, excluded initial trials, profiler intervention, held-out ranking checks, and source snapshots are in \path{paper/data/jsa_ablation/}.
+The separate concrete-candidate study, training-only prior audit, strict numerical failures, pinned-checkpoint provenance, and actual preparation records are in \path{paper/data/jsa_v2/}.
+Corrected pilot GPU runs and monitoring records are in \path{paper/data/jsa_replication/}; full-output checks are in \path{paper/data/jsa_numerics/}; derived selection audits and scope replays are in \path{paper/data/jsa_reanalysis/}.
+The unchanged original archive is \path{paper/data/bakeoff_v4/}, and initial supplemental legacy runs are retained in \path{paper/data/jsa_replication_legacy/}.
+The separate stock-matmul sweep is \texttt{paper/data/a40/}.
+Scripts in \texttt{paper/jsa/scripts/} reproduce output validation, GPU replications, analysis, and the figures.
+The supplementary figures use completed executable measurements; pilot figures use the primary corrected run and the separate stock sweep.
 
 \section*{Declaration of competing interest}
 The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
-
-\bibliographystyle{elsarticle-num}
-\bibliography{references}
 
 \appendix
 \section{Closed forms}
 \label{app:formulas}
 
-The intensities in Section~\ref{sec:method} are the functions in \texttt{shapefuse.intensity}.
-Bytes are cold off-chip counts.
+The intensities in Section~\ref{sec:method} are the functions in \texttt{shapefuse.\allowbreak intensity}.
+Bytes follow the analytical cold off-chip accounting.
 A multiply-add is two FLOPs.
 Element size $e$ is in bytes.
 
@@ -776,7 +574,7 @@ Element size $e$ is in bytes.
 \end{tabular}
 \end{center}
 
-The regime test is memory-bound if $\AI < 0.5R$, compute-bound if $\AI > 2R$, and ridge-region otherwise.
+The regime test is memory-bound if $AI < 0.5R$, compute-bound if $AI > 2R$, and ridge-region otherwise.
 Roofline time, with no launch term, is $\max(\mathrm{FLOPs}/P,\ \mathrm{bytes}/B)$.
 
 \section{Bakeoff path names}
@@ -791,12 +589,389 @@ Roofline time, with no launch term, is $\max(\mathrm{FLOPs}/P,\ \mathrm{bytes}/B
   eager & Eager MatMul then RMSNorm, or materialized attention then RMSNorm. \\
   compile & \texttt{torch.compile} of the fuse-attempt subgraph. The graph is not inspected. \\
   max-autotune & The same compile call with \texttt{mode="max-autotune"}, when it returns. \\
-  sdpa & Eager SDPA, then RMSNorm. Attention rows only. \\
+  sdpa & Eager SDPA followed by RMSNorm in one timing region. Attention rows only. \\
   always-fuse & The compile path. For attention this is the SDPA-plus-norm chain. \\
-  always-unfuse & The eager GEMM chain, or SDPA and RMSNorm timed as two regions. \\
+  always-unfuse & The eager GEMM chain, or the sum of separately timed SDPA and RMSNorm medians. \\
   scic-selected & A copy of the always-fuse or always-unfuse median named by the decision log. \\
   \bottomrule
 \end{tabular}
 \end{center}
+
+\section{Corrected pilot evidence}
+\label{sec:pilot}
+
+\subsection*{Pilot implementation and timing protocol}
+
+\paragraph{Binding plans to PyTorch execution paths}
+
+The recipes and timing accounting in this subsection describe the corrected pilot retained in Appendix~\ref{sec:pilot}.
+Section~\ref{sec:executed} specifies the supplementary executor, its exact-signature cache, and independently measured calls.
+
+\paragraph{MatMul plus RMSNorm}
+The workload uses FP16 and $N{=}K{=}4096$ at seven row counts between $M{=}1$ and $M{=}4096$.
+The eager baseline and \texttt{always\_unfuse} both execute the eager matrix product followed by RMSNorm, but are timed separately.
+The default compile baseline and \texttt{always\_fuse} both use \texttt{torch.compile} on the chain, also with separate timing regions.
+Their medians can differ despite sharing the same execution recipe.
+The max-autotune baseline compiles the same graph with \texttt{mode="max-autotune"} when the call succeeds.
+The analytical binding maps MemMode to \texttt{always\_fuse} and ComputeMode to \texttt{always\_unfuse}.
+Both paths now compute RMSNorm statistics and weighting in FP32 and cast the final output back to FP16.
+This precision specification is shared by the attention normalization helper.
+These names identify benchmark paths; because the compiled graphs were not inspected, they do not prove a particular fusion pattern inside TorchInductor~\cite{Ansel2024PyTorch2}.
+
+\paragraph{Attention plus RMSNorm}
+The workload uses batch 1, eight heads, and head dimension 64.
+Prefill lengths are 128, 512, and 2048; decode uses one query with cache lengths 128 and 2048.
+The eager baseline explicitly forms the scores and probabilities in PyTorch before applying RMSNorm.
+The \texttt{sdpa} baseline calls \texttt{scaled\_\allowbreak dot\_\allowbreak product\_\allowbreak attention} and then RMSNorm within one eager timing region.
+\texttt{always\_fuse} compiles the SDPA-plus-RMSNorm chain.
+\texttt{always\_unfuse} measures SDPA and RMSNorm separately and reports the sum of their two medians.
+This sum is a split-region accounting, not a separately measured median of the complete sequential chain.
+The SDPA backend was not logged, and the benchmark does not establish its score traffic or tile schedule.
+
+The attention executable policy is \texttt{compile\_sdpa\_chain} in every regime, recorded as \texttt{always\_fuse}.
+It therefore overrides epilogue placement when the analytical primary is ComputeMode with \texttt{fuse\_epilogue=false}.
+The policy predates GEMM calibration and is evaluated as a fixed library binding rather than as the implementation of both analytical modes.
+
+\paragraph{Pilot latency calibration and reported selection}
+
+With calibration scope \texttt{all-gemm}, the harness probes both GEMM paths for one warmup and three timed iterations at every shape.
+The path with the strictly smaller positive median becomes \texttt{measured\_winner}; a tie or missing measurement retains the analytical primary.
+The winner can override the primary outside the ridge band as well as within it.
+Attention is excluded from this probe.
+
+The archive names this source \texttt{measured\_wallclock} and records \texttt{WALLCLOCK\_\allowbreak CALIBRATION\_\allowbreak NOT\_\allowbreak DRAM\_\allowbreak AI}.
+On CUDA, the implementation measures elapsed GPU time with CUDA events, so we refer to it as latency calibration.
+The legacy field names describe a timing-based choice and do not denote measured arithmetic intensity.
+
+In the pilot harness, \texttt{scic\_selected} copies the regular-timing median of the baseline named by the decision log.
+It is not a separately timed dispatcher.
+For GEMM it follows the probe winner when available; for attention it copies the compiled chain.
+Dispatch, plan-switch, compilation, and calibration setup costs are excluded from the selected-latency column.
+
+The plan-cache key contains operator kind, dtype, machine, and a length bucket.
+Buckets are $1$, $2$--$8$, $9$--$32$, $33$--$128$, $129$--$512$, $513$--$2048$, $2049$--$8192$, and $8193+$.
+The GEMM harness appends the shape label when caching measured choices to avoid assuming that a single choice is valid for every shape in a bucket.
+The experiment therefore does not validate reuse of one measured choice throughout a bucket.
+
+\paragraph{Hardware, timing, and validation protocol}
+
+The corrected pilot uses three independent processes on one selected NVIDIA A40, with PyTorch 2.5.1+cu121, CUDA 12.1, and Python 3.10.12.
+The first process is designated the primary run before summarizing results; the other two assess repeatability.
+Each process starts after two consecutive samples with utilization at most $5\%$ and used device memory at most $256$~MiB.
+During-run GPU samples include the benchmark itself and cannot isolate other processes.
+Dynamo's \texttt{cache\_size\_limit} is set to $64$.
+The manifest stores exact commands, GPU samples, and a hash of the benchmark source.
+
+Before timing, complete outputs are checked against reference computations at all twelve workload shapes.
+For GEMM, the reference normalizes the FP16 matrix product using FP32 statistics; relative and absolute tolerances are both $10^{-3}$.
+For attention, the reference performs attention and normalization with FP32 intermediates and casts the result to FP16; both tolerances are $10^{-2}$.
+The numerical-validation record is tied to the benchmark-source hash, and the replication runner requires a passing record for that source.
+
+Regular timing uses three warmups and ten iterations; the GEMM probe uses one warmup and three iterations.
+CUDA events bracket the subgraph, and the device is synchronized after each iteration.
+Compilation is completed before the timed region.
+The probe is evaluated against the regular medians rather than against its own samples.
+Max-autotune is intentionally skipped in all corrected runs.
+Each run has 65 successful latency rows, 12 skipped max-autotune rows, and 12 decisions.
+Nsight Compute is not invoked and achieved DRAM intensity remains unavailable.
+
+The original \texttt{bakeoff\_v4} archive and the first supplemental legacy runs are retained separately.
+Their GEMM ratios are not used as equivalent-computation speedups after the numerical discrepancy was identified.
+The corrected pilot tables and figures use \path{paper/data/jsa_replication/run_01/}; repetitions and an offline calibration-scope replay are reported separately.
+
+
+The evaluation first examines stock-GEMM shape dependence and the numerical validity of the compared chains, then assesses corrected path rankings and calibration scope.
+The primary run supplies the main latency tables; all three corrected processes are summarized in Section~\ref{sec:replication}.
+Speedup is the eager baseline median divided by the reported path latency; values below one indicate a slowdown.
+Tables round recorded values, while geometric means use unrounded latency ratios.
+The two-path minimum is the smaller regular-timing value of \texttt{always\_fuse} and \texttt{always\_unfuse}; selected gap is reported selected latency divided by that minimum.
+This reference concerns available benchmark paths, not all possible kernels.
+
+\subsection{Shape dependence of stock GEMM throughput}
+\label{sec:matmul}
+
+Table~\ref{tab:matmul} and Figure~\ref{fig:matmul} show the separate stock \texttt{torch.matmul} sweep in \path{paper/data/a40/bench_gemm.csv}, marked \texttt{PARTIAL\_\allowbreak VENDOR\_\allowbreak MATMUL} with machine flag \texttt{A40\_FP16}.
+It contains no fused-plan timing.
+Between $M{=}1$ and $M{=}32$, latency remains approximately $0.07$--$0.08$~ms while the FLOP count increases by $32\times$.
+This observation is consistent with substantial fixed overhead for small products, but the sweep does not identify the responsible overheads.
+At $M{=}4096$, achieved throughput reaches $115.4$~TFLOP/s, or $77.1\%$ of the $149.7$~TFLOP/s datasheet peak.
+The sweep establishes shape dependence of achieved throughput without locating a measured Roofline ridge; every Nsight byte field is empty.
+
+\begin{table*}[t]
+  \centering
+  \caption{Stock \texttt{torch.matmul} on NVIDIA A40, FP16, $N{=}K{=}4096$.
+Medians and throughput are from \texttt{bench\_gemm.csv}; intensity and regime are analytical values under the A40 datasheet anchor.
+The \texttt{achieved\_ai} field is empty for every row.}
+  \label{tab:matmul}
+  \small
+  \begin{tabular}{@{}lrrrrl@{}}
+    \toprule
+    Label & $M$ & Median (ms) & TFLOP/s & $AI$ & Band \\
+    \midrule
+    decode\_gemv & 1 & 0.0707 & 0.47 & 1.00 & memory \\
+    micro\_batch & 4 & 0.0786 & 1.71 & 3.99 & memory \\
+    decode\_batch32 & 32 & 0.0782 & 13.7 & 31.5 & memory \\
+    near\_mstar & 344 & 0.142 & 81.3 & 295 & ridge \\
+    ridge\_m512 & 512 & 0.179 & 96.1 & 410 & ridge \\
+    prefill\_m2048 & 2048 & 0.659 & 104.3 & 1024 & compute \\
+    square\_large & 4096 & 1.191 & 115.4 & 1365 & compute \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_a40_torch_matmul_tflops.pdf}
+  \caption{Achieved throughput of stock \texttt{torch.matmul} in the separate A40 sweep.
+The dashed line is the dense FP16 datasheet peak, $149.7$~TFLOP/s.
+Point color denotes the regime of analytical intensity, not a measured bottleneck.}
+  \label{fig:matmul}
+\end{figure}
+
+\subsection{Numerical validation and legacy overflow}
+\label{sec:numerics}
+
+The original eager normalization evaluated the square of the FP16 GEMM output in FP16.
+Large entries overflowed before the mean, producing an infinite variance and all-zero normalized rows.
+The original compiled chain avoided this collapse in the audit, so the two paths were not numerically equivalent.
+For $M{=}4096$, 971 of 4096 eager rows collapsed to zero, and the maximum eager--compiled difference was about $5.49$.
+The finite-value check on a single output element in the old harness did not detect this problem.
+
+\begin{table}[t]
+  \centering
+  \caption{GEMM output audit with seed 0.
+  Legacy zeros counts collapsed eager rows.
+  Legacy error is maximum absolute eager--compiled difference; corrected error compares the compiled output with the FP32-normalization reference.
+  All corrected eager and compiled cases pass the stated tolerances.}
+  \label{tab:numerics}
+  \footnotesize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}rrrr@{}}
+    \toprule
+    $M$ & Legacy zeros & Legacy error & Corrected error \\
+    \midrule
+    1 & 0 & 0.00195 & 0 \\
+    32 & 8 & 4.29 & 0.000977 \\
+    128 & 38 & 4.68 & 0.00195 \\
+    256 & 57 & 4.7 & 0.00195 \\
+    512 & 110 & 5.04 & 0.00195 \\
+    2048 & 501 & 5.5 & 0.00195 \\
+    4096 & 971 & 5.49 & 0.00195 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Explicit FP32 statistics and weighting eliminate the collapse while retaining FP16 inputs and outputs.
+Corrected eager GEMM outputs match the reference exactly in this audit, and the maximum compiled-reference difference is $0.001953125$.
+All five corrected attention shapes pass their $10^{-2}$ tolerances, with maximum reference error $0.00390625$ across the materialized, eager-SDPA, and compiled paths.
+These are numerical-output checks, not SCIC resource-classification accuracy measurements.
+The legacy timing archives remain unchanged but are excluded from the main performance claims.
+
+\subsection{Corrected GEMM path selection}
+\label{sec:gemm-eval}
+
+Table~\ref{tab:gemm} and Figure~\ref{fig:gemm} use the first corrected run.
+The probe selects the compiled chain at every shape and agrees with all seven regular-timing minima.
+The compiled speedup ranges from $0.998\times$ at $M{=}128$, a near-tie with the independently timed eager baseline, to $1.771\times$ at $M{=}4096$.
+The selected geometric mean is $1.296\times$ over eager and its two-path gap is one.
+
+
+\begin{table*}[t]
+  \centering
+  \caption{Corrected MatMul+RMSNorm, primary A40 run, $N{=}K{=}4096$. Inputs and outputs are FP16; normalization intermediates are FP32. Data. is the analytical binding, Sel. is the probe winner, and SCIC copies its regular median. Speedups are relative to the separately timed eager chain.}
+  \label{tab:gemm}
+  \footnotesize
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{@{}lrrllllrrr@{}}
+    \toprule
+    Shape & $M$ & $AI$ & Band & Data. & Sel. & Eager & Fuse & Unfuse & SCIC \\
+          &     &       &      &       &      & (ms)  & $\times$ & $\times$ & $\times$ \\
+    \midrule
+    decode & 1 & 1.00 & memory & fuse & fuse & 0.126 & 1.079 & 1.008 & 1.079 \\
+    decode & 32 & 31.5 & memory & fuse & fuse & 0.127 & 1.057 & 1.018 & 1.057 \\
+    ridge & 128 & 120 & ridge & fuse & fuse & 0.122 & 0.998 & 0.988 & 0.998 \\
+    ridge & 256 & 228 & ridge & unfuse & fuse & 0.203 & 1.176 & 1.000 & 1.176 \\
+    ridge & 512 & 410 & ridge & unfuse & fuse & 0.349 & 1.543 & 1.000 & 1.543 \\
+    prefill & 2048 & 1024 & compute & unfuse & fuse & 1.274 & 1.680 & 0.999 & 1.680 \\
+    prefill & 4096 & 1365 & compute & unfuse & fuse & 2.408 & 1.771 & 1.000 & 1.771 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{figures/fig_gemm_plan_speedup.pdf}
+  \caption{Corrected MatMul+RMSNorm speedup over eager in the primary A40 run. All selected paths compile the chain. The separate default-compile series uses the same recipe with separate timing. The primary run contains no change in selected path across shapes.}
+  \label{fig:gemm}
+\end{figure}
+
+The analytical binding agrees with the regular winner at three shapes: $M \in \{1,32,128\}$.
+At $M \ge 256$, it chooses the eager path even though compilation is faster.
+Its geometric-mean speedup is $1.018\times$, compared with $1.296\times$ for the calibrated choice, a ratio of $1.273\times$.
+Always-fuse is also $1.296\times$, while always-unfuse is $1.002\times$.
+Thus calibration improves on the analytical binding but does not improve on static compilation in this run.
+Max-autotune was not measured for the corrected implementation.
+
+The previously reported unfuse-to-fuse crossover is not reproduced after correcting numerical precision.
+It cannot be used as evidence for a validated shape-dependent scheduling transition.
+Analytical intensity still changes with shape, but this alone does not establish that these two executable paths must change their ranking at the datasheet ridge.
+At large $M$, observed compilation gains exceed the equal-time prediction of the ideal cold-traffic model.
+The eager FP32 conversions introduce temporaries not counted by that ideal model, and launch and scheduling effects remain possible contributors.
+Without graph inspection or DRAM counters, the gain cannot be assigned to one mechanism.
+
+\subsection{Corrected attention and epilogue placement}
+\label{sec:attn-eval}
+
+Table~\ref{tab:attn} and Figure~\ref{fig:attn} report the primary corrected attention run.
+The fixed compiled-chain policy achieves $1.841\times$ geometric-mean speedup over score-materializing eager execution.
+At prefill $S{=}2048$, eager takes approximately $1.120$~ms and the compiled chain achieves $6.285\times$.
+This large difference combines the library attention implementation with epilogue placement and is not an isolated fusion gain.
+
+
+\begin{table*}[t]
+  \centering
+  \caption{Corrected Attention+RMSNorm, primary A40 run, $B{=}1$, $H{=}8$, $D{=}64$. Eager materializes scores. SDPA is the eager library chain; unfuse sums separately timed SDPA and RMSNorm medians; fuse compiles the chain. Normalization intermediates are FP32. The selected policy copies fuse in every regime; the SDPA backend is unlogged.}
+  \label{tab:attn}
+  \footnotesize
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{@{}llrrlrrrr@{}}
+    \toprule
+    Shape & Len. & $AI$ & Band & Primary & Eager & SDPA & Unfuse & Fuse \\
+          &      &       &      &         & (ms)  & $\times$ & $\times$ & $\times$ \\
+    \midrule
+    Prefill  &  $S{=}128$  &  64  &  memory  &  Mem & 0.202 & 1.518 & 1.487 & 1.539 \\
+    Prefill  &  $S{=}512$  &  256  &  ridge  &  Comp & 0.224 & 1.601 & 1.559 & 1.614 \\
+    Prefill  &  $S{=}2048$  &  1024  &  compute  &  Comp & 1.120 & 5.486 & 4.925 & 6.285 \\
+    Decode  &  $S_k{=}128$  &  0.992  &  memory  &  Mem & 0.196 & 1.472 & 1.431 & 1.154 \\
+    Decode  &  $S_k{=}2048$  &  1.000  &  memory  &  Mem & 0.222 & 1.374 & 1.550 & 1.173 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_attn_library_paths.pdf}
+  \caption{Corrected attention, primary A40 run. (a) Reported library-path latencies; the split value sums separately measured medians. (b) Speedup over the score-materializing eager baseline. Compilation is faster than eager SDPA on the three prefill shapes and slower on the two decode shapes in this run.}
+  \label{fig:attn}
+\end{figure*}
+
+Against eager SDPA, the compiled chain is slightly faster on the two smaller prefill shapes, faster on long prefill, and slower on both decode shapes in the primary run.
+The geometric mean of compiled-to-eager-SDPA latency is $1.050\times$.
+The selection gap against the fuse/unfuse minimum is $1.104\times$; it is one on prefill and exceeds one on both decode shapes.
+The split comparison must be interpreted as separately timed region accounting, not a directly timed sequential chain.
+
+Section~\ref{sec:replication} shows that several library-path rankings vary between processes.
+The primary run alone therefore does not establish a universal prefill/decode epilogue rule.
+In addition, the executable override compiles attention regardless of the analytical primary, so these results do not implement or compare custom attention tile modes.
+A calibrated attention selector should include eager SDPA and measure complete candidate chains consistently.
+
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_oracle_gap.pdf}
+  \caption{Selected latency divided by the smaller fuse/unfuse value in the primary corrected run. GEMM has gap one. Attention selects the compiled chain and exceeds the two-path minimum on both decode shapes. The split attention value is a sum of separately measured medians.}
+  \label{fig:oracle}
+\end{figure}
+
+\subsection{Aggregate performance of corrected paths}
+\label{sec:summary}
+
+Table~\ref{tab:summary} summarizes the primary corrected run.
+For GEMM, calibrated selection equals always-fuse and improves over the analytical binding.
+For attention, the selected policy also equals always-fuse; eager SDPA and the split accounting have larger geometric-mean speedups in this run.
+These summaries concern twelve subgraphs with different eager baselines, not model-level inference speedups.
+
+
+\begin{table*}[t]
+  \centering
+  \caption{Geometric means over the primary corrected shape sets. Attention speedups use a score-materializing eager baseline. Gap is selected latency divided by the fuse/unfuse minimum, listed as GEMM / attention. The attention analytical-primary cell is omitted because the executable policy overrides it.}
+  \label{tab:summary}
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Policy & GEMM ($n{=}7$) & Attention ($n{=}5$) & Gap \\
+    \midrule
+    Always fuse & 1.296 & 1.841 & --- \\
+    Always unfuse & 1.002 & 1.909 & --- \\
+    Datasheet primary & 1.018 & --- & --- \\
+    Eager SDPA & --- & 1.933 & --- \\
+    SCIC-selected & 1.296 & 1.841 & 1.000 / 1.104 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Calibration-scope ablation by offline replay}
+\label{sec:scope}
+
+We replay the primary corrected probe choices under restricted calibration scopes.
+Unprobed shapes retain their analytical binding, and reported latency is copied from the corresponding regular path.
+The replay introduces no new timings and does not estimate probe overhead.
+
+
+\begin{table}[t]
+  \centering
+  \caption{Offline calibration-scope replay using the primary corrected run. Probes counts shapes using their recorded probe winner; unprobed shapes retain their analytical binding. Speedup is relative to eager and gap to the two-path minimum. No new GPU time or setup cost is measured.}
+  \label{tab:scope}
+  \footnotesize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    Calibration scope & Probes & Speedup & Gap \\
+    \midrule
+    None (datasheet) & 0 & 1.018 & 1.273 \\
+    Ridge only, $[0.5R,2R]$ & 3 & 1.109 & 1.169 \\
+    Ridge and compute & 5 & 1.296 & 1.000 \\
+    Ridge only, $[0.1R,8R]$ & 6 & 1.296 & 1.000 \\
+    All GEMM & 7 & 1.296 & 1.000 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Using only the three default ridge-band shapes yields $1.109\times$ over eager and leaves a $1.169\times$ gap to the two-path minimum.
+Extending calibration to the compute side recovers the same $1.296\times$ result as all-GEMM calibration in this run, because the unprobed memory-side recommendations already agree with the recorded winners.
+The wider illustrative band also recovers that minimum.
+Thus the ridge-only ablation misses useful overrides, but all-shape probing is not necessary for the primary corrected run.
+This replay establishes neither an optimal band nor the runtime cost advantage of a restricted search.
+
+\subsection{Independent process replications}
+\label{sec:replication}
+
+Table~\ref{tab:replication} retains each corrected process separately.
+The GEMM probe matches 20 of 21 regular-timing choices, with selected speedups of $1.292\times$--$1.303\times$ over eager.
+The exception is $M{=}128$ in run 2: the probe chooses compile while the regular unfuse median is slightly lower.
+Its seven-shape geometric-mean gap is $1.001\times$.
+All probe choices compile the chain, so always-fuse attains the same selected speedups in every run.
+The analytical primary matches 3, 2, and 3 of seven regular choices, respectively; this is binding agreement, not classification accuracy.
+
+
+\begin{table*}[t]
+  \centering
+  \caption{Three independent processes using corrected normalization on one A40. Probe agreement compares calibration with the regular GEMM two-path minimum. Speedups use each run's eager baseline; gaps use its fuse/unfuse minimum. Attn./SDPA is compiled-to-eager-SDPA latency. All ratios are geometric means.}
+  \label{tab:replication}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lcrrrrr@{}}
+    \toprule
+    Run & Probe agreement & GEMM & GEMM gap & Attention & Attn. gap & Attn./SDPA \\
+        &                 & Speedup &        & Speedup &           & \\
+    \midrule
+    1 & 7/7 & 1.296 & 1.000 & 1.841 & 1.104 & 1.050 \\
+    2 & 6/7 & 1.292 & 1.001 & 1.762 & 1.106 & 1.073 \\
+    3 & 7/7 & 1.303 & 1.000 & 1.934 & 1.051 & 1.006 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+Attention speedups over materialized eager range from $1.762\times$ to $1.934\times$, while compiled-to-eager-SDPA geometric-mean latency ranges from $1.006\times$ to $1.073\times$.
+The compiled chain is slower than eager SDPA on 2, 2, and 1 shapes in the three runs.
+Its two-path selection gaps range from $1.051\times$ to $1.106\times$.
+Several individual library-path rankings change, demonstrating that the primary run's prefill/decode pattern is insufficient for a general rule.
+These repetitions concern one device, fixed inputs, and a short timing protocol; they do not establish robustness on a serving trace.
+
+
+\clearpage
+\bibliographystyle{cas-model2-names}
+\bibliography{references}
 
 \end{document}
